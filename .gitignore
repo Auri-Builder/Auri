@@ -1,0 +1,37 @@
+# Runtime directories
+data/*
+inbox/*
+outbox/*
+processing/*
+failed/*
+logs/*
+models/*
+
+# Keep folder structure
+!data/.gitkeep
+!inbox/.gitkeep
+!outbox/.gitkeep
+!processing/.gitkeep
+!failed/.gitkeep
+!logs/.gitkeep
+!models/.gitkeep
+
+# Secrets
+.env
+env/
+*.key
+*.pem
+
+# Financial files
+*.csv
+
+# Logs
+*.log
+*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
