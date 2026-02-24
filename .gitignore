@@ -9,6 +9,8 @@ models/*
 
 # Keep folder structure
 !data/.gitkeep
+!data/portfolio/
+!data/portfolio/.gitkeep
 !inbox/.gitkeep
 !outbox/.gitkeep
 !processing/.gitkeep
