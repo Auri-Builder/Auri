@@ -43,20 +43,54 @@ directly — the agent imports will fail.
 
 ---
 
-### 1. Place your CSV export
+### 1. Create accounts.yaml (required)
 
-Copy a broker CSV export into the safe portfolio directory:
+`portfolio_summary_v0` will not run without this manifest. Every CSV you
+intend to process must be declared here. The file is gitignored and will
+never be committed.
 
+Create `data/portfolio/accounts.yaml` with the following structure:
+
+```yaml
+accounts:
+  holdings.csv:
+    account_id:   "ACCT-001"          # your internal reference
+    account_name: "My TFSA"
+    account_type: "TFSA"              # required — drives registered/non-registered split
+    institution:  "TD"
+    owner:        "Jeff"              # optional
+    currency:     "CAD"              # optional default; row-level currency takes priority
+
+  rrsp.csv:
+    account_id:   "ACCT-002"
+    account_name: "My RRSP"
+    account_type: "RRSP"
+    institution:  "TD"
+    currency:     "CAD"
 ```
-data/portfolio/holdings.csv
-```
 
-This path is gitignored (`data/*` and `*.csv` are excluded). The file
-will never be committed.
+Rules:
+- The key (`holdings.csv`) must match the CSV **filename exactly** (not the full path).
+- `account_type` is **required** per entry — determines registered vs non-registered.
+- All other fields are optional but recommended.
+- Manifest fields only fill in what the CSV itself does not supply (CSV data wins).
 
 ---
 
-### 2. Start the job runner (OriCN terminal)
+### 2. Place your CSV export(s)
+
+Copy broker CSV exports into the safe portfolio directory:
+
+```
+data/portfolio/holdings.csv
+data/portfolio/rrsp.csv     # optional second account
+```
+
+These paths are gitignored (`*.csv` is excluded). Files will never be committed.
+
+---
+
+### 3. Start the job runner (OriCN terminal)
 
 ```bash
 python -m core.job_runner
@@ -67,7 +101,7 @@ Leave this running in a separate terminal.
 
 ---
 
-### 3. Submit jobs (OriCore terminal)
+### 4. Submit jobs (OriCore terminal)
 
 **Ping (regression check — confirms the runner is alive):**
 
@@ -75,7 +109,7 @@ Leave this running in a separate terminal.
 python -m core.submit_job_cli ping
 ```
 
-**portfolio_import_v0 — validate and count rows:**
+**portfolio_import_v0 — validate and count rows (no manifest required):**
 
 ```bash
 python -m core.submit_job_cli portfolio_import_v0 \
@@ -85,7 +119,7 @@ python -m core.submit_job_cli portfolio_import_v0 \
 Returns: row count, canonical fields detected, unrecognized columns.
 No financial values are included in the output.
 
-**portfolio_summary_v0 — full analytics summary:**
+**Test 1 — summary with a single CSV (must be in accounts.yaml):**
 
 ```bash
 python -m core.submit_job_cli portfolio_summary_v0 \
@@ -94,16 +128,25 @@ python -m core.submit_job_cli portfolio_summary_v0 \
     top_n=5
 ```
 
-Optional: if your CSV has no account_type column, supply it directly:
+**Test 2 — summary merging multiple accounts:**
 
 ```bash
 python -m core.submit_job_cli portfolio_summary_v0 \
-    csv_path=data/portfolio/holdings.csv \
-    account_type=TFSA
+    "csv_paths=[data/portfolio/holdings.csv,data/portfolio/rrsp.csv]" \
+    top_n=5
 ```
 
-Returns: total market value, position count, top N positions (by weight),
-sector weights, registered/non-registered split, concentration flags.
+Note: the `csv_paths` list must be provided as JSON when using the CLI directly;
+see `core/oricore.py` `submit_and_wait` for programmatic use.
+
+**Test 3 — failure when a CSV is not declared in accounts.yaml:**
+
+```bash
+python -m core.submit_job_cli portfolio_summary_v0 \
+    csv_path=data/portfolio/unlisted.csv
+```
+
+Expected: `status: failed`, error message naming the missing manifest entry.
 
 **Skip approval gate for scripted smoke tests:**
 
@@ -113,7 +156,7 @@ python -m core.submit_job_cli ping --no-approval
 
 ---
 
-### 4. Read the result
+### 5. Read the result
 
 Results are written to `outbox/<job_id>.json` and printed to stdout
 by the CLI. Example summary output:

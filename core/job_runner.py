@@ -1,6 +1,7 @@
 import time
 import json
 import uuid
+import yaml
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,9 @@ PROJECT_ROOT = Path("/home/cplus/oricn").resolve()
 # ---------------------------------------------------------------------------
 SAFE_PORTFOLIO_DIR = (PROJECT_ROOT / "data" / "portfolio").resolve()
 
+# Canonical location of the accounts manifest (already inside SAFE_PORTFOLIO_DIR).
+ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
+
 # ---------------------------------------------------------------------------
 # handle_list_dir
 #
@@ -75,55 +79,131 @@ def handle_ping(params):
 
 
 # ---------------------------------------------------------------------------
-# _resolve_csv_path
+# _resolve_one_csv / _resolve_csv_path / _resolve_csv_paths
 #
 # SECURITY PRINCIPLE: Symlink-safe double sandbox.
 #
-# All CSV access for ORI_IA actions must pass through this helper.
+# All CSV access for ORI_IA actions must pass through these helpers.
 #
-# Steps:
-#   1. Validate csv_path param is a non-empty string.
-#   2. Resolve symlinks (prevents symlink traversal to locations outside the
-#      sandbox — Path.resolve() follows symlinks before comparison).
-#   3. Confirm the resolved path is inside SAFE_PORTFOLIO_DIR
-#      (is_relative_to is the correct containment check; startswith on
-#      strings is vulnerable to prefix collisions like "/data/portfolio2").
-#   4. Confirm the resolved path exists and ends with .csv.
+# _resolve_one_csv:   core validation on a single raw path string.
+# _resolve_csv_path:  wraps _resolve_one_csv for single-file params dicts
+#                     (used by portfolio_import_v0).
+# _resolve_csv_paths: wraps _resolve_one_csv for csv_path / csv_paths params
+#                     (used by portfolio_summary_v0).
 #
-# Returns the resolved Path on success, or an error dict on any violation.
+# Validation steps (all three share via _resolve_one_csv):
+#   1. Input must be a non-empty string.
+#   2. Resolve symlinks before containment check — prevents a symlink that
+#      points outside SAFE_PORTFOLIO_DIR from bypassing the sandbox.
+#   3. is_relative_to() for containment — immune to prefix string collisions
+#      (e.g. "/data/portfolio2" would fool a startswith check).
+#   4. File must exist and end with .csv.
 # ---------------------------------------------------------------------------
-def _resolve_csv_path(params: dict) -> "Path | dict":
-    """
-    Validate and resolve a 'csv_path' job parameter to a safe, real path.
 
-    Args:
-        params: the job params dict (already confirmed to be a dict by run_job)
+def _resolve_one_csv(raw: str) -> "Path | dict":
+    """Resolve and sandbox a single raw CSV path string."""
+    if not isinstance(raw, str) or not raw.strip():
+        return {"error": f"CSV path must be a non-empty string, got: {raw!r}"}
 
-    Returns:
-        Resolved pathlib.Path on success.
-        {"error": str} on any validation failure.
-    """
-    csv_path_raw = params.get("csv_path")
+    resolved = (PROJECT_ROOT / raw.strip()).resolve()
 
-    if not isinstance(csv_path_raw, str) or not csv_path_raw.strip():
-        return {"error": "csv_path must be a non-empty string"}
-
-    # Resolve symlinks so that a symlink pointing outside SAFE_PORTFOLIO_DIR
-    # cannot be used to bypass the sandbox.
-    resolved = (PROJECT_ROOT / csv_path_raw.strip()).resolve()
-
-    # is_relative_to: True only if resolved is SAFE_PORTFOLIO_DIR or a
-    # descendant of it — not susceptible to prefix string collisions.
     if not resolved.is_relative_to(SAFE_PORTFOLIO_DIR):
-        return {"error": "csv_path is outside the allowed portfolio directory"}
+        return {"error": f"CSV path is outside the allowed portfolio directory: {raw!r}"}
 
     if not resolved.exists():
         return {"error": f"CSV file not found: {resolved.name}"}
 
     if resolved.suffix.lower() != ".csv":
-        return {"error": "Only .csv files are permitted"}
+        return {"error": f"Only .csv files are permitted, got: {resolved.name}"}
 
     return resolved
+
+
+def _resolve_csv_path(params: dict) -> "Path | dict":
+    """
+    Validate and resolve a 'csv_path' job parameter to a safe, real path.
+    Used by portfolio_import_v0 (single-file only).
+    """
+    raw = params.get("csv_path")
+    if not isinstance(raw, str) or not raw.strip():
+        return {"error": "csv_path must be a non-empty string"}
+    return _resolve_one_csv(raw)
+
+
+def _resolve_csv_paths(params: dict) -> "list[Path] | dict":
+    """
+    Accept either:
+      csv_path  (str)        → single CSV, returned as a one-element list
+      csv_paths (list[str])  → multiple CSVs, each individually sandboxed
+
+    Providing both keys is an error. Providing neither is an error.
+    Used by portfolio_summary_v0.
+    """
+    single = params.get("csv_path")
+    multiple = params.get("csv_paths")
+
+    if single is not None and multiple is not None:
+        return {"error": "Provide either csv_path or csv_paths, not both"}
+
+    if single is not None:
+        result = _resolve_one_csv(single)
+        return result if isinstance(result, dict) else [result]
+
+    if multiple is not None:
+        if not isinstance(multiple, list) or len(multiple) == 0:
+            return {"error": "csv_paths must be a non-empty list of strings"}
+        paths: list[Path] = []
+        for raw in multiple:
+            r = _resolve_one_csv(raw)
+            if isinstance(r, dict):
+                return r  # propagate first error immediately
+            paths.append(r)
+        return paths
+
+    return {"error": "Either csv_path or csv_paths is required"}
+
+
+# ---------------------------------------------------------------------------
+# _load_accounts_manifest
+#
+# Reads data/portfolio/accounts.yaml — a required file that maps each CSV
+# filename to its account metadata.  The manifest path is already within
+# SAFE_PORTFOLIO_DIR; no additional sandbox check is needed.
+#
+# Uses yaml.safe_load exclusively — this prevents execution of arbitrary
+# Python tags that full yaml.load would allow.
+# ---------------------------------------------------------------------------
+
+def _load_accounts_manifest() -> "dict | dict":
+    """
+    Load and parse data/portfolio/accounts.yaml.
+
+    Returns:
+        The 'accounts' mapping {csv_filename: metadata_dict} on success.
+        {"error": str} if the file is missing, unparseable, or malformed.
+    """
+    if not ACCOUNTS_MANIFEST_PATH.exists():
+        return {
+            "error": (
+                "accounts.yaml not found in data/portfolio/ — "
+                "create it before running portfolio_summary_v0 (see README for format)"
+            )
+        }
+
+    try:
+        with ACCOUNTS_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
+            manifest = yaml.safe_load(fh)  # safe_load: no arbitrary tag execution
+    except yaml.YAMLError as exc:
+        return {"error": f"accounts.yaml parse error: {exc}"}
+
+    if not isinstance(manifest, dict) or "accounts" not in manifest:
+        return {"error": "accounts.yaml must have a top-level 'accounts' key"}
+
+    accounts = manifest["accounts"]
+    if not isinstance(accounts, dict):
+        return {"error": "accounts.yaml 'accounts' must be a filename → metadata mapping"}
+
+    return accounts
 
 
 # ---------------------------------------------------------------------------
@@ -174,46 +254,60 @@ def handle_portfolio_import_v0(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # handle_portfolio_summary_v0
 #
-# SECURITY PRINCIPLE: Aggregates only.
+# SECURITY PRINCIPLE: Aggregates only. Manifest-gated file access.
 #
-# Normalizes the CSV internally (same sandbox as import) and runs all
-# analytics. The output contains only computed aggregates — totals,
-# percentages, flags — not the underlying row-level financial data.
+# All CSVs must be declared in data/portfolio/accounts.yaml before they can
+# be processed. This prevents arbitrary CSV reads even within the sandbox —
+# the manifest is the explicit allowlist for financial data files.
+#
+# Manifest metadata (account_type, institution, currency) is injected into
+# rows where the CSV itself did not supply those fields. CSV data takes
+# priority; the manifest fills gaps only.
+#
+# Output contains computed aggregates only — no row-level financial data.
 # ---------------------------------------------------------------------------
 def handle_portfolio_summary_v0(params: dict) -> dict:
     """
-    Produce a full portfolio analytics summary from a CSV.
+    Produce a full portfolio analytics summary from one or more CSVs.
 
-    Required param:
-        csv_path (str): path relative to PROJECT_ROOT, must be inside
-                        data/portfolio/ and end with .csv
+    Required params (one of):
+        csv_path  (str):       single CSV relative to PROJECT_ROOT
+        csv_paths (list[str]): multiple CSVs; rows are merged before analysis
+
+    All CSVs must be declared in data/portfolio/accounts.yaml.
+    If accounts.yaml is missing, or a CSV is not listed in it, the job fails.
 
     Optional params:
-        concentration_threshold (float): flag positions above this fraction
-                                         of total portfolio. Default: 0.10 (10%)
-        top_n (int):  number of top positions to include. Default: 5
-        account_type (str): account type override for rows that have no
-                            account_type column (e.g. "RRSP", "TFSA")
+        concentration_threshold (float): flag positions above this fraction.
+                                         Default: 0.10 (10%)
+        top_n (int): number of top positions to include. Default: 5
 
     Returns:
         {
-            "total_market_value":        float,
-            "position_count":            int,
-            "unique_symbols":            int,
-            "top_positions":             [{symbol, weight_pct}, ...],
-            "sector_weights_pct":        {sector: pct, ...},
-            "account_type_split":        {bucket: market_value, ...},
-            "concentration_flags":       [{symbol, weight_pct, flag}, ...],
+            "total_market_value":          float,
+            "position_count":              int,
+            "unique_symbols":              int,
+            "top_positions":               [{symbol, weight_pct}, ...],
+            "sector_weights_pct":          {sector: pct, ...},
+            "account_type_split":          {bucket: market_value, ...},
+            "concentration_flags":         [{symbol, weight_pct, flag}, ...],
             "concentration_threshold_pct": float,
+            "accounts_loaded":             [{file, account_type, institution}, ...],
         }
     """
-    path_or_err = _resolve_csv_path(params)
-    if isinstance(path_or_err, dict):
-        return path_or_err
+    # --- 1. Resolve + sandbox all CSV paths ---
+    paths_or_err = _resolve_csv_paths(params)
+    if isinstance(paths_or_err, dict):
+        return paths_or_err
+    csv_paths: list[Path] = paths_or_err
 
-    csv_path = path_or_err
+    # --- 2. Load the accounts manifest (required) ---
+    accounts_or_err = _load_accounts_manifest()
+    if isinstance(accounts_or_err, dict) and "error" in accounts_or_err:
+        return accounts_or_err
+    accounts: dict = accounts_or_err
 
-    # Optional params — validate types and apply defaults
+    # --- 3. Validate optional analytics params ---
     raw_threshold = params.get("concentration_threshold", 0.10)
     if not isinstance(raw_threshold, (int, float)):
         return {"error": "concentration_threshold must be a number"}
@@ -227,21 +321,60 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     if raw_top_n < 1:
         return {"error": "top_n must be at least 1"}
 
-    account_type_override = params.get("account_type")
-    if account_type_override is not None and not isinstance(account_type_override, str):
-        return {"error": "account_type must be a string"}
+    # --- 4. Normalize each CSV, inject manifest metadata, accumulate rows ---
+    all_rows: list[dict] = []
+    accounts_loaded: list[dict] = []
 
-    try:
-        rows, _, _ = normalize_csv(csv_path)
-    except (ValueError, OSError) as exc:
-        return {"error": f"CSV parse failed: {exc}"}
+    for csv_path in csv_paths:
+        filename = csv_path.name
 
-    return build_summary(
-        rows,
+        # Manifest check: every CSV must be explicitly declared.
+        if filename not in accounts:
+            return {
+                "error": (
+                    f"'{filename}' is not listed in accounts.yaml — "
+                    f"add an entry for it before running this job"
+                )
+            }
+
+        meta = accounts[filename]
+        if not isinstance(meta, dict):
+            return {"error": f"Manifest entry for '{filename}' must be a key/value mapping"}
+
+        # account_type is required in the manifest so the registered/non-registered
+        # split is always deterministic, even when the CSV omits it.
+        if not meta.get("account_type"):
+            return {"error": f"Manifest entry for '{filename}' is missing required field: account_type"}
+
+        try:
+            rows, _, _ = normalize_csv(csv_path)
+        except (ValueError, OSError) as exc:
+            return {"error": f"CSV parse failed for '{filename}': {exc}"}
+
+        # Inject manifest fields into rows where the CSV left them blank.
+        # CSV-supplied values always take priority (we only fill None fields).
+        for row in rows:
+            for field in ("account_id", "account_type", "institution", "currency"):
+                if row.get(field) is None and meta.get(field):
+                    row[field] = str(meta[field]).strip() or None
+
+        all_rows.extend(rows)
+
+        # Record which accounts were loaded (metadata only, no financial values).
+        accounts_loaded.append({
+            "file":         filename,
+            "account_type": meta.get("account_type"),
+            "institution":  meta.get("institution"),
+        })
+
+    # --- 5. Run analytics on the merged row set ---
+    summary = build_summary(
+        all_rows,
         concentration_threshold=concentration_threshold,
         top_n=raw_top_n,
-        account_type_override=account_type_override,
     )
+    summary["accounts_loaded"] = accounts_loaded
+    return summary
 
 
 # ---------------------------------------------------------------------------
