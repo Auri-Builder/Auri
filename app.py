@@ -220,7 +220,7 @@ def main() -> None:
         with f_col3:
             acct_filter = st.selectbox(
                 "Account Type",
-                options=["All", "Registered only", "Non-registered only"],
+                options=["All", "Registered only", "Non-registered only", "Unclassified only"],
             )
 
         # Apply filters — empty multiselect means no filter (show all).
@@ -233,6 +233,8 @@ def main() -> None:
             mask &= pos_df["registered_value"] > 0
         elif acct_filter == "Non-registered only":
             mask &= pos_df["non_registered_value"] > 0
+        elif acct_filter == "Unclassified only":
+            mask &= pos_df["unclassified_value"] > 0
 
         filtered = pos_df[mask].rename(columns={
             "symbol":               "Symbol",
@@ -243,6 +245,7 @@ def main() -> None:
             "weight_pct":           "Weight (%)",
             "registered_value":     "Registered",
             "non_registered_value": "Non-Reg",
+            "unclassified_value":   "Unclassified",
             "account_count":        "Accounts",
         })
 
@@ -260,6 +263,9 @@ def main() -> None:
                 ),
                 "Non-Reg": st.column_config.NumberColumn(
                     "Non-Reg ($)", format="$%,.2f"
+                ),
+                "Unclassified": st.column_config.NumberColumn(
+                    "Unclassified ($)", format="$%,.2f"
                 ),
             },
             width="stretch",

@@ -135,29 +135,46 @@ class TestComputePositionsSummaryStableKey(unittest.TestCase):
 
 
 class TestComputePositionsSummaryRegisteredSplit(unittest.TestCase):
+    """
+    Three-bucket classification:
+      registered        → REGISTERED_ACCOUNT_TYPES (TFSA, RRSP, RESP, …)
+      non_registered    → NON_REGISTERED_ACCOUNT_TYPES (CASH, MARGIN, …)
+      unclassified      → empty / None / any other unrecognised type
+    """
 
     def test_registered_account_type_goes_to_registered_value(self):
         rows = [_row(symbol="AAPL", market_value=1000.0, account_type="TFSA")]
         result = compute_positions_summary(rows, total_mv=1000.0)
         self.assertAlmostEqual(result[0]["registered_value"], 1000.0)
         self.assertAlmostEqual(result[0]["non_registered_value"], 0.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 0.0)
 
-    def test_non_registered_account_type_goes_to_non_registered_value(self):
+    def test_cash_goes_to_non_registered_value(self):
+        """CASH is an explicitly known non-registered type."""
         rows = [_row(symbol="AAPL", market_value=1000.0, account_type="CASH")]
         result = compute_positions_summary(rows, total_mv=1000.0)
         self.assertAlmostEqual(result[0]["registered_value"], 0.0)
         self.assertAlmostEqual(result[0]["non_registered_value"], 1000.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 0.0)
+
+    def test_margin_goes_to_non_registered_value(self):
+        """MARGIN is an explicitly known non-registered type."""
+        rows = [_row(symbol="AAPL", market_value=500.0, account_type="MARGIN")]
+        result = compute_positions_summary(rows, total_mv=500.0)
+        self.assertAlmostEqual(result[0]["non_registered_value"], 500.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 0.0)
 
     def test_split_across_registered_and_non_registered(self):
-        """Same symbol held in both RRSP (registered) and margin (non-registered)."""
+        """Same symbol held in RRSP (registered) and CASH (explicit non-registered)."""
         rows = [
             _row(symbol="AAPL", market_value=700.0, account_type="RRSP"),
-            _row(symbol="AAPL", market_value=300.0, account_type="MARGIN"),
+            _row(symbol="AAPL", market_value=300.0, account_type="CASH"),
         ]
         result = compute_positions_summary(rows, total_mv=1000.0)
         self.assertEqual(len(result), 1)
         self.assertAlmostEqual(result[0]["registered_value"], 700.0)
         self.assertAlmostEqual(result[0]["non_registered_value"], 300.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 0.0)
 
     def test_rrsp_is_registered(self):
         rows = [_row(symbol="X", market_value=500.0, account_type="RRSP")]
@@ -169,11 +186,47 @@ class TestComputePositionsSummaryRegisteredSplit(unittest.TestCase):
         result = compute_positions_summary(rows, total_mv=500.0)
         self.assertAlmostEqual(result[0]["registered_value"], 500.0)
 
-    def test_none_account_type_goes_to_non_registered(self):
-        """Rows with no account_type at all are treated as non-registered."""
+    def test_none_account_type_goes_to_unclassified(self):
+        """Rows with no account_type are unclassified — not silently non-registered."""
         rows = [_row(symbol="AAPL", market_value=1000.0, account_type=None)]
         result = compute_positions_summary(rows, total_mv=1000.0)
-        self.assertAlmostEqual(result[0]["non_registered_value"], 1000.0)
+        self.assertAlmostEqual(result[0]["registered_value"], 0.0)
+        self.assertAlmostEqual(result[0]["non_registered_value"], 0.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 1000.0)
+
+    def test_unknown_account_type_goes_to_unclassified(self):
+        """An account type not in either set surfaces as unclassified."""
+        rows = [_row(symbol="AAPL", market_value=800.0, account_type="PENSION")]
+        result = compute_positions_summary(rows, total_mv=800.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 800.0)
+        self.assertAlmostEqual(result[0]["registered_value"], 0.0)
+        self.assertAlmostEqual(result[0]["non_registered_value"], 0.0)
+
+    def test_all_three_buckets_split(self):
+        """Same symbol across TFSA (registered), CASH (non-reg), and unknown type."""
+        rows = [
+            _row(symbol="AAPL", market_value=500.0, account_type="TFSA"),
+            _row(symbol="AAPL", market_value=300.0, account_type="CASH"),
+            _row(symbol="AAPL", market_value=200.0, account_type="PENSION"),
+        ]
+        result = compute_positions_summary(rows, total_mv=1000.0)
+        self.assertEqual(len(result), 1)
+        self.assertAlmostEqual(result[0]["registered_value"], 500.0)
+        self.assertAlmostEqual(result[0]["non_registered_value"], 300.0)
+        self.assertAlmostEqual(result[0]["unclassified_value"], 200.0)
+
+    def test_bucket_subtotals_sum_to_market_value(self):
+        """Invariant: reg + non_reg + unclassified == market_value after reconciliation."""
+        rows = [
+            _row(symbol="AAPL", market_value=700.0, account_type="TFSA"),
+            _row(symbol="AAPL", market_value=300.0, account_type="CASH"),
+        ]
+        result = compute_positions_summary(rows, total_mv=1000.0)
+        p = result[0]
+        bucket_total = round(
+            p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
+        )
+        self.assertAlmostEqual(bucket_total, p["market_value"])
 
 
 class TestComputePositionsSummaryAccountCount(unittest.TestCase):
@@ -257,7 +310,7 @@ class TestComputePositionsSummaryOutputShape(unittest.TestCase):
         required_keys = {
             "symbol", "security_name", "sector", "asset_class",
             "market_value", "weight_pct", "registered_value",
-            "non_registered_value", "account_count",
+            "non_registered_value", "unclassified_value", "account_count",
         }
         self.assertEqual(set(result[0].keys()), required_keys)
 
@@ -273,6 +326,60 @@ class TestComputePositionsSummaryOutputShape(unittest.TestCase):
                 key.startswith("_"),
                 f"Private accumulator key leaked into output: {key!r}",
             )
+
+
+class TestComputePositionsSummaryReconciliation(unittest.TestCase):
+    """
+    Reconciliation invariant: after rounding each sub-total independently,
+    registered + non_registered + unclassified must always equal market_value.
+    Any floating-point cent discrepancy is folded into unclassified_value.
+    """
+
+    def test_subtotals_always_sum_to_market_value_single_bucket(self):
+        """Clean case: one bucket, no rounding needed."""
+        rows = [_row(symbol="AAPL", market_value=1234.56, account_type="TFSA")]
+        result = compute_positions_summary(rows, total_mv=1234.56)
+        p = result[0]
+        total = round(
+            p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
+        )
+        self.assertAlmostEqual(total, p["market_value"])
+
+    def test_subtotals_always_sum_to_market_value_three_buckets(self):
+        """Three-bucket case with potentially different rounding per bucket."""
+        rows = [
+            _row(symbol="X", market_value=333.33, account_type="TFSA"),
+            _row(symbol="X", market_value=333.33, account_type="CASH"),
+            _row(symbol="X", market_value=333.34, account_type="PENSION"),
+        ]
+        total_mv = 1000.0
+        result = compute_positions_summary(rows, total_mv=total_mv)
+        p = result[0]
+        bucket_sum = round(
+            p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
+        )
+        self.assertAlmostEqual(bucket_sum, p["market_value"])
+
+    def test_unclassified_absorbs_rounding_delta(self):
+        """
+        Manufacture a scenario where rounding three sub-totals independently
+        produces a 1-cent delta.  The function must fold it into unclassified.
+        """
+        # 0.005 rounds to 0.01 under round-half-to-even, so deliberately pick
+        # values that are hard for float representation.
+        rows = [
+            _row(symbol="X", market_value=0.001, account_type="TFSA"),
+            _row(symbol="X", market_value=0.001, account_type="CASH"),
+            _row(symbol="X", market_value=0.003, account_type="UNKNOWN_TYPE"),
+        ]
+        total_mv = 0.005
+        result = compute_positions_summary(rows, total_mv=total_mv)
+        if result:  # may be empty if total_mv rounds to 0 in weight calc
+            p = result[0]
+            bucket_sum = round(
+                p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
+            )
+            self.assertAlmostEqual(bucket_sum, p["market_value"])
 
 
 if __name__ == "__main__":

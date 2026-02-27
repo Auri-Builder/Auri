@@ -211,6 +211,22 @@ REGISTERED_ACCOUNT_TYPES: frozenset[str] = frozenset({
     "FHSA",   # First Home Savings Account (2023+)
 })
 
+# ---------------------------------------------------------------------------
+# NON_REGISTERED_ACCOUNT_TYPES
+#
+# Explicitly known non-registered account types.  Any account_type that is
+# neither in REGISTERED_ACCOUNT_TYPES nor in this set is classified as
+# "unclassified" rather than silently folded into non_registered — this
+# surfaces data-quality gaps at the position level.
+# ---------------------------------------------------------------------------
+NON_REGISTERED_ACCOUNT_TYPES: frozenset[str] = frozenset({
+    "CASH",           # Cash / non-registered investment account
+    "NON_REGISTERED", # Catch-all label used by some exporters
+    "TAXABLE",        # US-style taxable brokerage label
+    "MARGIN",         # Margin account (always non-registered)
+    "CORPORATE",      # Corporate investment account
+})
+
 # Safe subdirectory (relative to PROJECT_ROOT) where portfolio CSVs must reside.
 # job_runner.py enforces this — this constant is the shared source of truth.
 SAFE_PORTFOLIO_SUBDIR: str = "data/portfolio"

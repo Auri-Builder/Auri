@@ -17,7 +17,7 @@ These functions implement ORI_IA Phase 2 — Policy Analysis:
 import logging
 from typing import Optional
 
-from agents.ori_ia.schema import REGISTERED_ACCOUNT_TYPES
+from agents.ori_ia.schema import NON_REGISTERED_ACCOUNT_TYPES, REGISTERED_ACCOUNT_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -220,9 +220,14 @@ def compute_positions_summary(
             market_value         float  — sum across all accounts, rounded 2dp
             weight_pct           float  — market_value / total_mv * 100, 2dp
             registered_value     float  — mv from REGISTERED_ACCOUNT_TYPES rows
-            non_registered_value float  — mv from all other rows
+            non_registered_value float  — mv from NON_REGISTERED_ACCOUNT_TYPES rows
+            unclassified_value   float  — mv from rows with unrecognised account_type;
+                                          absorbs any floating-point reconciliation delta
             account_count        int    — distinct accounts holding this symbol
         Returns [] when total_mv is 0.
+
+        Invariant (after reconciliation):
+            registered_value + non_registered_value + unclassified_value == market_value
     """
     if total_mv == 0:
         logger.warning("total_mv is 0 — cannot compute positions summary")
@@ -261,6 +266,7 @@ def compute_positions_summary(
                 "market_value":       0.0,
                 "registered_value":   0.0,
                 "non_registered_value": 0.0,
+                "unclassified_value": 0.0,
                 "_account_keys":      set(),
             }
 
@@ -275,12 +281,21 @@ def compute_positions_summary(
         if entry["_asset_class"] is None and r.get("asset_class"):
             entry["_asset_class"] = r.get("asset_class")
 
-        # ── Registered vs non-registered split ─────────────────────────────
+        # ── Three-bucket classification ─────────────────────────────────────
+        # registered        → REGISTERED_ACCOUNT_TYPES (schema.py)
+        # non_registered    → NON_REGISTERED_ACCOUNT_TYPES (schema.py)
+        # unclassified      → anything else, including empty/None account_type
+        #
+        # "unclassified" is intentionally distinct from "non_registered" so
+        # that data-quality gaps (unknown account types) are visible rather
+        # than silently absorbed into a known bucket.
         raw_type = (r.get("account_type") or "").strip().upper()
         if raw_type in REGISTERED_ACCOUNT_TYPES:
             entry["registered_value"] += mv
-        else:
+        elif raw_type in NON_REGISTERED_ACCOUNT_TYPES:
             entry["non_registered_value"] += mv
+        else:
+            entry["unclassified_value"] += mv
 
         # ── Account-count key ───────────────────────────────────────────────
         # Note: manifest 'label' is not injected into canonical rows
@@ -301,16 +316,29 @@ def compute_positions_summary(
     # ── Build output list ───────────────────────────────────────────────────
     result = []
     for entry in accum.values():
-        mv = entry["market_value"]
+        mv   = round(entry["market_value"], 2)
+        reg  = round(entry["registered_value"], 2)
+        nreg = round(entry["non_registered_value"], 2)
+        uncl = round(entry["unclassified_value"], 2)
+
+        # Reconciliation: rounding each sub-total independently can introduce
+        # a ±0.01 cent discrepancy.  Fold any delta into unclassified_value so
+        # the three buckets always sum exactly to market_value.
+        classified_total = round(reg + nreg + uncl, 2)
+        delta = round(mv - classified_total, 2)
+        if abs(delta) >= 0.01:
+            uncl = round(uncl + delta, 2)
+
         result.append({
             "symbol":               entry["_display_symbol"],
             "security_name":        entry["_security_name"],
             "sector":               entry["_sector"] or "unknown",
             "asset_class":          entry["_asset_class"] or "unknown",
-            "market_value":         round(mv, 2),
+            "market_value":         mv,
             "weight_pct":           round((mv / total_mv) * 100, 2),
-            "registered_value":     round(entry["registered_value"], 2),
-            "non_registered_value": round(entry["non_registered_value"], 2),
+            "registered_value":     reg,
+            "non_registered_value": nreg,
+            "unclassified_value":   uncl,
             "account_count":        len(entry["_account_keys"]),
         })
 
@@ -363,6 +391,7 @@ def build_summary(
         "concentration_threshold_pct": round(concentration_threshold * 100, 1),
         # GOVERNANCE: aggregates only — no row-level data.
         # compute_positions_summary produces one entry per unique symbol;
-        # registered_value and non_registered_value are sub-totals, not rows.
+        # registered_value, non_registered_value, and unclassified_value are
+        # sub-totals that always sum to market_value (reconciliation enforced).
         "positions_summary": compute_positions_summary(rows, total_mv),
     }
