@@ -310,9 +310,24 @@ class TestComputePositionsSummaryOutputShape(unittest.TestCase):
         required_keys = {
             "symbol", "security_name", "sector", "asset_class",
             "market_value", "weight_pct", "registered_value",
-            "non_registered_value", "unclassified_value", "account_count",
+            "non_registered_value", "unclassified_value",
+            "reconciliation_delta", "account_count",
         }
         self.assertEqual(set(result[0].keys()), required_keys)
+
+    def test_reconciliation_delta_is_zero_in_normal_operation(self):
+        """Under normal float arithmetic, reconciliation_delta should always be 0.00."""
+        rows = [
+            _row(symbol="AAPL", market_value=1000.0, account_type="TFSA"),
+            _row(symbol="AAPL", market_value=500.0,  account_type="CASH"),
+            _row(symbol="GOOG", market_value=750.0,  account_type="RRSP"),
+        ]
+        result = compute_positions_summary(rows, total_mv=2250.0)
+        for p in result:
+            self.assertAlmostEqual(
+                p["reconciliation_delta"], 0.0,
+                msg=f"Expected delta=0 for {p['symbol']}, got {p['reconciliation_delta']}",
+            )
 
     def test_no_row_level_fields_in_output(self):
         """
@@ -336,7 +351,7 @@ class TestComputePositionsSummaryReconciliation(unittest.TestCase):
     """
 
     def test_subtotals_always_sum_to_market_value_single_bucket(self):
-        """Clean case: one bucket, no rounding needed."""
+        """Clean case: one bucket, delta must be 0.00."""
         rows = [_row(symbol="AAPL", market_value=1234.56, account_type="TFSA")]
         result = compute_positions_summary(rows, total_mv=1234.56)
         p = result[0]
@@ -344,9 +359,10 @@ class TestComputePositionsSummaryReconciliation(unittest.TestCase):
             p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
         )
         self.assertAlmostEqual(total, p["market_value"])
+        self.assertAlmostEqual(p["reconciliation_delta"], 0.0)
 
     def test_subtotals_always_sum_to_market_value_three_buckets(self):
-        """Three-bucket case with potentially different rounding per bucket."""
+        """Three-bucket case: post-fold buckets always sum to market_value."""
         rows = [
             _row(symbol="X", market_value=333.33, account_type="TFSA"),
             _row(symbol="X", market_value=333.33, account_type="CASH"),
@@ -359,14 +375,15 @@ class TestComputePositionsSummaryReconciliation(unittest.TestCase):
             p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
         )
         self.assertAlmostEqual(bucket_sum, p["market_value"])
+        # reconciliation_delta is the pre-fold value; it is stored regardless
+        self.assertIn("reconciliation_delta", p)
 
     def test_unclassified_absorbs_rounding_delta(self):
         """
         Manufacture a scenario where rounding three sub-totals independently
-        produces a 1-cent delta.  The function must fold it into unclassified.
+        produces a 1-cent delta.  The function must fold it into unclassified
+        and record reconciliation_delta with the pre-fold value.
         """
-        # 0.005 rounds to 0.01 under round-half-to-even, so deliberately pick
-        # values that are hard for float representation.
         rows = [
             _row(symbol="X", market_value=0.001, account_type="TFSA"),
             _row(symbol="X", market_value=0.001, account_type="CASH"),
@@ -376,10 +393,13 @@ class TestComputePositionsSummaryReconciliation(unittest.TestCase):
         result = compute_positions_summary(rows, total_mv=total_mv)
         if result:  # may be empty if total_mv rounds to 0 in weight calc
             p = result[0]
+            # After folding, buckets must sum exactly to market_value
             bucket_sum = round(
                 p["registered_value"] + p["non_registered_value"] + p["unclassified_value"], 2
             )
             self.assertAlmostEqual(bucket_sum, p["market_value"])
+            # reconciliation_delta is always present
+            self.assertIn("reconciliation_delta", p)
 
 
 if __name__ == "__main__":

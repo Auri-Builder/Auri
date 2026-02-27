@@ -498,9 +498,13 @@ def handle_portfolio_snapshot_v0(params: dict) -> dict:
         "concentration_threshold_pct": summary.get("concentration_threshold_pct"),
         "accounts_loaded":             summary.get("accounts_loaded", []),
         # GOVERNANCE: positions_summary is aggregates only (per-symbol totals,
-        # registered/non-registered sub-totals, account count).
+        # registered/non-registered/unclassified sub-totals, account count,
+        # reconciliation_delta diagnostic field).
         # No row-level holdings data is written to the derived output.
-        "positions_summary":           summary.get("positions_summary", []),
+        "positions_summary":                  summary.get("positions_summary", []),
+        # Scalar diagnostic: count of positions where rounding folded a delta.
+        # 0 in all normal runs; non-zero warrants investigation.
+        "positions_with_delta_folded_count":  summary.get("positions_with_delta_folded_count", 0),
     }
 
     # --- Write to data/derived/ ---

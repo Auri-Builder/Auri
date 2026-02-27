@@ -236,7 +236,7 @@ def main() -> None:
         elif acct_filter == "Unclassified only":
             mask &= pos_df["unclassified_value"] > 0
 
-        filtered = pos_df[mask].rename(columns={
+        filtered = pos_df[mask].drop(columns=["reconciliation_delta"], errors="ignore").rename(columns={
             "symbol":               "Symbol",
             "security_name":        "Security",
             "sector":               "Sector",

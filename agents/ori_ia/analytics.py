@@ -322,12 +322,13 @@ def compute_positions_summary(
         uncl = round(entry["unclassified_value"], 2)
 
         # Reconciliation: rounding each sub-total independently can introduce
-        # a ±0.01 cent discrepancy.  Fold any delta into unclassified_value so
-        # the three buckets always sum exactly to market_value.
+        # a ±0.01 cent discrepancy.  Capture the raw delta before folding so
+        # callers can detect and log the event; then fold into unclassified_value
+        # so the three buckets always sum exactly to market_value.
         classified_total = round(reg + nreg + uncl, 2)
-        delta = round(mv - classified_total, 2)
-        if abs(delta) >= 0.01:
-            uncl = round(uncl + delta, 2)
+        reconciliation_delta = round(mv - classified_total, 2)  # 0.00 in normal operation
+        if abs(reconciliation_delta) >= 0.01:
+            uncl = round(uncl + reconciliation_delta, 2)
 
         result.append({
             "symbol":               entry["_display_symbol"],
@@ -339,6 +340,10 @@ def compute_positions_summary(
             "registered_value":     reg,
             "non_registered_value": nreg,
             "unclassified_value":   uncl,
+            # Diagnostic: non-zero only when rounding produced a ≥0.01 delta.
+            # Stored pre-fold so observers can see the original discrepancy.
+            # Always 0.00 under normal float arithmetic with real market values.
+            "reconciliation_delta": reconciliation_delta,
             "account_count":        len(entry["_account_keys"]),
         })
 
@@ -380,6 +385,12 @@ def build_summary(
     total_mv = compute_total_market_value(rows)
     position_weights = compute_position_weights(rows, total_mv)
 
+    # GOVERNANCE: aggregates only — no row-level data.
+    # compute_positions_summary produces one entry per unique symbol;
+    # registered_value, non_registered_value, and unclassified_value are
+    # sub-totals that always sum to market_value (reconciliation enforced).
+    positions_summary = compute_positions_summary(rows, total_mv)
+
     return {
         "total_market_value": round(total_mv, 2),
         "position_count": len(rows),
@@ -389,9 +400,12 @@ def build_summary(
         "account_type_split": compute_account_type_split(rows, account_type_override),
         "concentration_flags": compute_concentration_flags(position_weights, concentration_threshold),
         "concentration_threshold_pct": round(concentration_threshold * 100, 1),
-        # GOVERNANCE: aggregates only — no row-level data.
-        # compute_positions_summary produces one entry per unique symbol;
-        # registered_value, non_registered_value, and unclassified_value are
-        # sub-totals that always sum to market_value (reconciliation enforced).
-        "positions_summary": compute_positions_summary(rows, total_mv),
+        "positions_summary": positions_summary,
+        # Count of positions where rounding produced a ≥0.01 cent discrepancy.
+        # Should always be 0; non-zero value signals a float arithmetic anomaly
+        # worth investigating (e.g. sub-cent input values).
+        "positions_with_delta_folded_count": sum(
+            1 for p in positions_summary
+            if abs(p.get("reconciliation_delta", 0.0)) >= 0.01
+        ),
     }
