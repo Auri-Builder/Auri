@@ -16,6 +16,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 from agents.ori_ia.normalize import normalize_csv
 from agents.ori_ia.analytics import build_summary
+from agents.ori_ia.enrich import load_symbol_ref, enrich_rows
 
 
 INBOX = Path(__file__).resolve().parent.parent / "inbox"
@@ -42,6 +43,11 @@ SAFE_PORTFOLIO_DIR = (PROJECT_ROOT / "data" / "portfolio").resolve()
 
 # Canonical location of the accounts manifest (already inside SAFE_PORTFOLIO_DIR).
 ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
+
+# Symbol reference file — public market data, tracked in git, optional.
+# Stored under refs/ (not data/) so it is not caught by the data/* gitignore rule.
+# Enriches sector/asset_class fields that broker CSV exports typically omit.
+SYMBOL_REF_PATH = (PROJECT_ROOT / "refs" / "symbols.yaml").resolve()
 
 # ---------------------------------------------------------------------------
 # handle_list_dir
@@ -129,38 +135,6 @@ def _resolve_csv_path(params: dict) -> "Path | dict":
         return {"error": "csv_path must be a non-empty string"}
     return _resolve_one_csv(raw)
 
-
-def _resolve_csv_paths(params: dict) -> "list[Path] | dict":
-    """
-    Accept either:
-      csv_path  (str)        → single CSV, returned as a one-element list
-      csv_paths (list[str])  → multiple CSVs, each individually sandboxed
-
-    Providing both keys is an error. Providing neither is an error.
-    Used by portfolio_summary_v0.
-    """
-    single = params.get("csv_path")
-    multiple = params.get("csv_paths")
-
-    if single is not None and multiple is not None:
-        return {"error": "Provide either csv_path or csv_paths, not both"}
-
-    if single is not None:
-        result = _resolve_one_csv(single)
-        return result if isinstance(result, dict) else [result]
-
-    if multiple is not None:
-        if not isinstance(multiple, list) or len(multiple) == 0:
-            return {"error": "csv_paths must be a non-empty list of strings"}
-        paths: list[Path] = []
-        for raw in multiple:
-            r = _resolve_one_csv(raw)
-            if isinstance(r, dict):
-                return r  # propagate first error immediately
-            paths.append(r)
-        return paths
-
-    return {"error": "Either csv_path or csv_paths is required"}
 
 
 # ---------------------------------------------------------------------------
@@ -270,12 +244,13 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     """
     Produce a full portfolio analytics summary from one or more CSVs.
 
-    Required params (one of):
-        csv_path  (str):       single CSV relative to PROJECT_ROOT
-        csv_paths (list[str]): multiple CSVs; rows are merged before analysis
+    Optional params (selection — omit all to auto-load every manifest entry):
+        csv_path  (str):              single CSV relative to PROJECT_ROOT
+        csv_paths (str | list[str]):  one or more CSVs; rows are merged before analysis
+                                      a bare string is treated as a one-element list
 
-    All CSVs must be declared in data/portfolio/accounts.yaml.
-    If accounts.yaml is missing, or a CSV is not listed in it, the job fails.
+    All CSVs must be declared in data/portfolio/accounts.yaml (required manifest).
+    If accounts.yaml is missing, empty, or a CSV is not listed in it, the job fails.
 
     Optional params:
         concentration_threshold (float): flag positions above this fraction.
@@ -295,19 +270,66 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
             "accounts_loaded":             [{file, account_type, institution}, ...],
         }
     """
-    # --- 1. Resolve + sandbox all CSV paths ---
-    paths_or_err = _resolve_csv_paths(params)
-    if isinstance(paths_or_err, dict):
-        return paths_or_err
-    csv_paths: list[Path] = paths_or_err
-
-    # --- 2. Load the accounts manifest (required) ---
+    # --- 1. Load accounts manifest (required in all cases) ---
+    # Must happen before path resolution so the manifest can supply the file
+    # list when the caller omits csv_path / csv_paths entirely.
     accounts_or_err = _load_accounts_manifest()
     if isinstance(accounts_or_err, dict) and "error" in accounts_or_err:
         return accounts_or_err
     accounts: dict = accounts_or_err
 
-    # --- 3. Validate optional analytics params ---
+    if not accounts:
+        return {"error": "accounts.yaml has no entries — add at least one CSV entry"}
+
+    # --- 2. Build path → metadata map from manifest ---
+    # Each entry may supply an explicit 'csv_path' field; otherwise the path is
+    # derived as data/portfolio/{key}. This supports both current format
+    # (key = filename) and future format (key = logical name + explicit csv_path).
+    path_meta: dict = {}
+    for acct_key, meta in accounts.items():
+        if not isinstance(meta, dict):
+            return {"error": f"Manifest entry '{acct_key}' must be a key/value mapping"}
+        raw_path = meta.get("csv_path") or f"data/portfolio/{acct_key}"
+        resolved = _resolve_one_csv(str(raw_path))
+        if isinstance(resolved, dict):
+            return {"error": f"Account '{acct_key}': {resolved['error']}"}
+        path_meta[resolved] = meta
+
+    # --- 3. Resolve the caller's CSV selection, or default to all manifest entries ---
+    single = params.get("csv_path")
+    multiple = params.get("csv_paths")
+
+    if single is not None and multiple is not None:
+        return {"error": "Provide either csv_path or csv_paths, not both"}
+
+    if single is None and multiple is None:
+        # Auto-load: process every CSV registered in the manifest.
+        csv_paths = list(path_meta.keys())
+
+    elif single is not None:
+        resolved = _resolve_one_csv(single)
+        if isinstance(resolved, dict):
+            return resolved
+        if resolved not in path_meta:
+            return {"error": f"'{resolved.name}' is not declared in accounts.yaml"}
+        csv_paths = [resolved]
+
+    else:
+        # csv_paths: accept a single string or a list of strings.
+        if isinstance(multiple, str):
+            multiple = [multiple]
+        if not isinstance(multiple, list) or len(multiple) == 0:
+            return {"error": "csv_paths must be a non-empty list or string"}
+        csv_paths = []
+        for raw in multiple:
+            resolved = _resolve_one_csv(raw)
+            if isinstance(resolved, dict):
+                return resolved
+            if resolved not in path_meta:
+                return {"error": f"'{resolved.name}' is not declared in accounts.yaml"}
+            csv_paths.append(resolved)
+
+    # --- 4. Validate optional analytics params ---
     raw_threshold = params.get("concentration_threshold", 0.10)
     if not isinstance(raw_threshold, (int, float)):
         return {"error": "concentration_threshold must be a number"}
@@ -321,25 +343,13 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     if raw_top_n < 1:
         return {"error": "top_n must be at least 1"}
 
-    # --- 4. Normalize each CSV, inject manifest metadata, accumulate rows ---
+    # --- 5. Normalize each CSV, inject manifest metadata, accumulate rows ---
     all_rows: list[dict] = []
     accounts_loaded: list[dict] = []
 
     for csv_path in csv_paths:
         filename = csv_path.name
-
-        # Manifest check: every CSV must be explicitly declared.
-        if filename not in accounts:
-            return {
-                "error": (
-                    f"'{filename}' is not listed in accounts.yaml — "
-                    f"add an entry for it before running this job"
-                )
-            }
-
-        meta = accounts[filename]
-        if not isinstance(meta, dict):
-            return {"error": f"Manifest entry for '{filename}' must be a key/value mapping"}
+        meta = path_meta[csv_path]  # guaranteed present — built from same manifest
 
         # account_type is required in the manifest so the registered/non-registered
         # split is always deterministic, even when the CSV omits it.
@@ -367,7 +377,16 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
             "institution":  meta.get("institution"),
         })
 
-    # --- 5. Run analytics on the merged row set ---
+    # --- 5b. Enrich sector/asset_class from local symbol reference ---
+    # Optional: if symbols.yaml is absent, enrichment is skipped gracefully.
+    # CSV-supplied and manifest-injected values already take priority (only fills None).
+    try:
+        symbol_ref = load_symbol_ref(SYMBOL_REF_PATH)
+    except ValueError as exc:
+        return {"error": f"symbols.yaml parse error: {exc}"}
+    enrich_rows(all_rows, symbol_ref)
+
+    # --- 6. Run analytics on the merged row set ---
     summary = build_summary(
         all_rows,
         concentration_threshold=concentration_threshold,

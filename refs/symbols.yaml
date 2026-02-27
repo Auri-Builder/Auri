@@ -1,0 +1,64 @@
+# ORI_IA symbol reference — sector/asset_class enrichment
+#
+# Public market identifier data — safe to track in git.
+# CSV-supplied values always take priority; this file fills gaps only.
+# Add new symbols as your holdings change.
+#
+# Keys are stored uppercase. Lookups are normalized to uppercase so that
+# broker export capitalization differences ("vfv" vs "VFV") never cause misses.
+#
+# Sector taxonomy (Canadian investor perspective):
+#   Equities - Canada, Equities - US, Financials, Energy, Real Estate,
+#   Utilities, Communications, Healthcare, Consumer Discretionary,
+#   Materials, Fixed Income, Money Market
+#
+# Asset class taxonomy:
+#   Equity, ETF, REIT, LP, Trust, Structured Note, Mutual Fund
+
+symbols:
+
+  # ---------------------------------------------------------------------------
+  # ETFs
+  # ---------------------------------------------------------------------------
+  ZWK:  {sector: "Financials",              asset_class: "ETF"}  # BMO Covered Call Canadian Banks ETF
+  VFV:  {sector: "Equities - US",           asset_class: "ETF"}  # Vanguard S&P 500 Index ETF (CAD)
+  ZWC:  {sector: "Equities - Canada",       asset_class: "ETF"}  # BMO Canadian High Dividend Covered Call ETF
+  ZBK:  {sector: "Financials",              asset_class: "ETF"}  # BMO Equal Weight US Banks ETF (hedged)
+  HHL:  {sector: "Healthcare",              asset_class: "ETF"}  # Harvest Healthcare Leaders Income ETF
+  ZEB:  {sector: "Financials",              asset_class: "ETF"}  # BMO Equal Weight Banks ETF
+
+  # ---------------------------------------------------------------------------
+  # Equities (individual stocks)
+  # ---------------------------------------------------------------------------
+  BAM:   {sector: "Financials",             asset_class: "Equity"}  # Brookfield Asset Management
+  TOU:   {sector: "Energy",                asset_class: "Equity"}  # Tourmaline Oil Corp
+  ENB:   {sector: "Energy",                asset_class: "Equity"}  # Enbridge Inc
+  T:     {sector: "Communications",        asset_class: "Equity"}  # TELUS Corporation
+  EQIX:  {sector: "Real Estate",           asset_class: "Equity"}  # Equinix Inc (US data centre REIT)
+  TSLA:  {sector: "Consumer Discretionary", asset_class: "Equity"} # Tesla Inc
+  WCP:   {sector: "Energy",                asset_class: "Equity"}  # Whitecap Resources
+  UURAF: {sector: "Energy",                asset_class: "Equity"}  # Ur-Energy Inc (OTC)
+
+  # ---------------------------------------------------------------------------
+  # REITs
+  # ---------------------------------------------------------------------------
+  CRT.UN: {sector: "Real Estate",          asset_class: "REIT"}   # CT Real Estate Investment Trust
+  AP.UN:  {sector: "Real Estate",          asset_class: "REIT"}   # Allied Properties REIT
+
+  # ---------------------------------------------------------------------------
+  # Trusts and Limited Partnerships
+  # ---------------------------------------------------------------------------
+  CHE.UN: {sector: "Materials",            asset_class: "Trust"}  # Chemtrade Logistics Income Fund
+  AD.UN:  {sector: "Financials",           asset_class: "Trust"}  # Alaris Equity Partners Income Trust
+  BEP.UN: {sector: "Utilities",            asset_class: "LP"}     # Brookfield Renewable Partners LP
+
+  # ---------------------------------------------------------------------------
+  # Fixed Income / Funds
+  # ---------------------------------------------------------------------------
+  NPP5502: {sector: "Fixed Income",        asset_class: "Structured Note"}  # TD structured product
+  TDB8151: {sector: "Money Market",        asset_class: "Mutual Fund"}       # TD money market fund
+
+  # ---------------------------------------------------------------------------
+  # TSX Venture
+  # ---------------------------------------------------------------------------
+  UCU: {sector: "Energy",                 asset_class: "Equity"}  # Uranium Creek Corp (UCU.V — uranium exploration)

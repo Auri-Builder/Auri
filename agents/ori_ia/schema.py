@@ -146,6 +146,7 @@ COLUMN_MAP: dict[str, str] = {
     "unrealized p/l":       "unrealized_gain",
     "open p&l":             "unrealized_gain",
     "unrealized pl":        "unrealized_gain",
+    "unrealized $":         "unrealized_gain",   # TD WebBroker export header
 
     # ----- unrealized_gain_percent -----
     "unrealized gain %":        "unrealized_gain_percent",
@@ -156,12 +157,24 @@ COLUMN_MAP: dict[str, str] = {
     "unrealized gain pct":      "unrealized_gain_percent",
     "unrealized return":        "unrealized_gain_percent",
     "unrealized p/l %":         "unrealized_gain_percent",
+    "unrealized %":             "unrealized_gain_percent",  # TD WebBroker export header
 
     # ----- currency -----
     "currency":             "currency",
     "ccy":                  "currency",
     "curr":                 "currency",
     "currency code":        "currency",
+
+    # ----- intentionally dropped columns (None = known but not mapped) -----
+    # These headers appear in TD WebBroker exports and have no canonical
+    # equivalent. Mapping them to None causes detect_column_mapping to place
+    # them in unmapped_columns (silently dropped) rather than logging them as
+    # "unrecognized". This distinguishes "known noise" from truly unknown headers.
+    "% of positions":   None,   # portfolio weight — computed by analytics, not imported
+    "market":           None,   # TD UI column with no consistent meaning
+    "loan value":       None,   # margin/credit facility — out of scope for v0
+    "change today $":   None,   # intraday delta — not relevant to position analytics
+    "change today %":   None,   # intraday delta — not relevant to position analytics
 }
 
 # ---------------------------------------------------------------------------
