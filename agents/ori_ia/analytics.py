@@ -180,6 +180,143 @@ def compute_concentration_flags(
     return sorted(flags, key=lambda f: f["weight_pct"], reverse=True)
 
 
+def compute_positions_summary(
+    rows: list[dict],
+    total_mv: float,
+) -> list[dict]:
+    """
+    Compute a per-symbol aggregate breakdown of the portfolio.
+
+    GOVERNANCE: Aggregates only — no row-level holdings data is returned.
+    Each entry collapses all rows that share the same ticker across every
+    loaded account into a single summary record.
+
+    Grouping key design (prevents spurious merges of unrelated holdings):
+      - Ticker present    → symbol.strip().upper()          e.g. "AAPL"
+      - Ticker absent     → "NAME:<security_name.upper()>"  avoids collision
+                            with real tickers
+      - Neither available → "UNKNOWN:<row_index>"           unique per row,
+                            prevents unrelated no-ID positions from pooling
+
+    Account-count key priority (identifies distinct accounts stably):
+      1. account_id  — explicit account number from CSV or manifest injection
+      2. f"{account_type}@{institution}@{currency}" — composite fallback
+         (manifest 'label' is not injected into canonical rows, so it is
+         not available here; account_id is the correct unique handle)
+
+    Args:
+        rows:     Normalized rows (canonical dicts from normalize_csv /
+                  enriched by enrich_rows and manifest injection).
+        total_mv: Pre-computed total portfolio market value (from
+                  compute_total_market_value).  Must be > 0.
+
+    Returns:
+        List of per-symbol dicts sorted by market_value descending.
+        Each dict:
+            symbol               str    — ticker, security_name, or "UNKNOWN:<n>"
+            security_name        str|None
+            sector               str    — "unknown" when absent
+            asset_class          str    — "unknown" when absent
+            market_value         float  — sum across all accounts, rounded 2dp
+            weight_pct           float  — market_value / total_mv * 100, 2dp
+            registered_value     float  — mv from REGISTERED_ACCOUNT_TYPES rows
+            non_registered_value float  — mv from all other rows
+            account_count        int    — distinct accounts holding this symbol
+        Returns [] when total_mv is 0.
+    """
+    if total_mv == 0:
+        logger.warning("total_mv is 0 — cannot compute positions summary")
+        return []
+
+    # accum: grouping_key → running aggregate dict
+    accum: dict[str, dict] = {}
+
+    for row_index, r in enumerate(rows):
+        # ── Stable grouping key ─────────────────────────────────────────────
+        raw_symbol = r.get("symbol")
+        raw_name   = r.get("security_name")
+
+        if raw_symbol and raw_symbol.strip():
+            key            = raw_symbol.strip().upper()
+            display_symbol = raw_symbol.strip().upper()
+        elif raw_name and raw_name.strip():
+            # Prefix prevents "APPLE INC" from ever colliding with a ticker
+            # whose uppercased value happens to match the security name.
+            key            = f"NAME:{raw_name.strip().upper()}"
+            display_symbol = raw_name.strip()
+        else:
+            # Row has no usable identifier — give it a unique slot so it is
+            # never merged with any other unidentifiable row.
+            key            = f"UNKNOWN:{row_index}"
+            display_symbol = "UNKNOWN"
+
+        mv = r.get("market_value") or 0.0
+
+        if key not in accum:
+            accum[key] = {
+                "_display_symbol":    display_symbol,
+                "_security_name":     raw_name,
+                "_sector":            None,
+                "_asset_class":       None,
+                "market_value":       0.0,
+                "registered_value":   0.0,
+                "non_registered_value": 0.0,
+                "_account_keys":      set(),
+            }
+
+        entry = accum[key]
+        entry["market_value"] += mv
+
+        # First non-None descriptive value encountered wins for each field.
+        if entry["_security_name"] is None and raw_name:
+            entry["_security_name"] = raw_name
+        if entry["_sector"] is None and r.get("sector"):
+            entry["_sector"] = r.get("sector")
+        if entry["_asset_class"] is None and r.get("asset_class"):
+            entry["_asset_class"] = r.get("asset_class")
+
+        # ── Registered vs non-registered split ─────────────────────────────
+        raw_type = (r.get("account_type") or "").strip().upper()
+        if raw_type in REGISTERED_ACCOUNT_TYPES:
+            entry["registered_value"] += mv
+        else:
+            entry["non_registered_value"] += mv
+
+        # ── Account-count key ───────────────────────────────────────────────
+        # Note: manifest 'label' is not injected into canonical rows
+        # (only account_id / account_type / institution / currency are injected),
+        # so the priority here is: account_id → composite fallback.
+        acct_id   = r.get("account_id")
+        acct_type = r.get("account_type") or ""
+        acct_inst = r.get("institution") or ""
+        acct_ccy  = r.get("currency") or ""
+
+        if acct_id and str(acct_id).strip():
+            acct_key = str(acct_id).strip()
+        else:
+            acct_key = f"{acct_type}@{acct_inst}@{acct_ccy}"
+
+        entry["_account_keys"].add(acct_key)
+
+    # ── Build output list ───────────────────────────────────────────────────
+    result = []
+    for entry in accum.values():
+        mv = entry["market_value"]
+        result.append({
+            "symbol":               entry["_display_symbol"],
+            "security_name":        entry["_security_name"],
+            "sector":               entry["_sector"] or "unknown",
+            "asset_class":          entry["_asset_class"] or "unknown",
+            "market_value":         round(mv, 2),
+            "weight_pct":           round((mv / total_mv) * 100, 2),
+            "registered_value":     round(entry["registered_value"], 2),
+            "non_registered_value": round(entry["non_registered_value"], 2),
+            "account_count":        len(entry["_account_keys"]),
+        })
+
+    return sorted(result, key=lambda p: p["market_value"], reverse=True)
+
+
 def build_summary(
     rows: list[dict],
     concentration_threshold: float = 0.10,
@@ -224,4 +361,8 @@ def build_summary(
         "account_type_split": compute_account_type_split(rows, account_type_override),
         "concentration_flags": compute_concentration_flags(position_weights, concentration_threshold),
         "concentration_threshold_pct": round(concentration_threshold * 100, 1),
+        # GOVERNANCE: aggregates only — no row-level data.
+        # compute_positions_summary produces one entry per unique symbol;
+        # registered_value and non_registered_value are sub-totals, not rows.
+        "positions_summary": compute_positions_summary(rows, total_mv),
     }

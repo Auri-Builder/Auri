@@ -497,6 +497,10 @@ def handle_portfolio_snapshot_v0(params: dict) -> dict:
         "concentration_flags":         summary.get("concentration_flags", []),
         "concentration_threshold_pct": summary.get("concentration_threshold_pct"),
         "accounts_loaded":             summary.get("accounts_loaded", []),
+        # GOVERNANCE: positions_summary is aggregates only (per-symbol totals,
+        # registered/non-registered sub-totals, account count).
+        # No row-level holdings data is written to the derived output.
+        "positions_summary":           summary.get("positions_summary", []),
     }
 
     # --- Write to data/derived/ ---
