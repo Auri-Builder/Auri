@@ -175,6 +175,13 @@ COLUMN_MAP: dict[str, str] = {
     "loan value":       None,   # margin/credit facility — out of scope for v0
     "change today $":   None,   # intraday delta — not relevant to position analytics
     "change today %":   None,   # intraday delta — not relevant to position analytics
+    # TD WebBroker exports both "Average Cost" (per-share unit cost) and
+    # "Book Cost" (total CAD position cost).  "Average Cost" appears first in
+    # the TD header row (column 4 vs column 6), so without this entry it would
+    # win the cost_basis slot and displace the semantically correct total cost.
+    # Dropping "Average Cost" here lets "Book Cost" → cost_basis win cleanly.
+    # Non-TD exports that only expose a per-share average use "avg cost" (kept).
+    "average cost":     None,   # TD per-share unit cost — total provided by "book cost"
 }
 
 # ---------------------------------------------------------------------------
