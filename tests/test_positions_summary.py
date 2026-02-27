@@ -312,6 +312,7 @@ class TestComputePositionsSummaryOutputShape(unittest.TestCase):
             "market_value", "weight_pct", "registered_value",
             "non_registered_value", "unclassified_value",
             "reconciliation_delta", "account_count",
+            "cost_basis", "unrealized_gain", "unrealized_gain_pct",
         }
         self.assertEqual(set(result[0].keys()), required_keys)
 

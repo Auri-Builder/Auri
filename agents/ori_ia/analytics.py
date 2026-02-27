@@ -224,6 +224,12 @@ def compute_positions_summary(
             unclassified_value   float  — mv from rows with unrecognised account_type;
                                           absorbs any floating-point reconciliation delta
             account_count        int    — distinct accounts holding this symbol
+            cost_basis           float|None — sum of canonical cost_basis across all rows;
+                                              None when no row provided this field
+            unrealized_gain      float|None — sum of canonical unrealized_gain across all rows;
+                                              None when no row provided this field
+            unrealized_gain_pct  float|None — unrealized_gain / cost_basis * 100;
+                                              None when cost_basis is None or 0
         Returns [] when total_mv is 0.
 
         Invariant (after reconciliation):
@@ -268,6 +274,11 @@ def compute_positions_summary(
                 "non_registered_value": 0.0,
                 "unclassified_value": 0.0,
                 "_account_keys":      set(),
+                # cost-basis aggregates — only accumulated when the row supplies data
+                "cost_basis":         0.0,
+                "_has_cost_basis":    False,
+                "unrealized_gain":    0.0,
+                "_has_unrealized":    False,
             }
 
         entry = accum[key]
@@ -296,6 +307,20 @@ def compute_positions_summary(
             entry["non_registered_value"] += mv
         else:
             entry["unclassified_value"] += mv
+
+        # ── Cost-basis aggregates ────────────────────────────────────────────
+        # Accumulate only non-None values so that rows lacking cost_basis
+        # (e.g. from brokers that don't export it) are excluded from the sum
+        # rather than pulling the total toward zero.
+        cb = r.get("cost_basis")
+        if cb is not None:
+            entry["cost_basis"] += cb
+            entry["_has_cost_basis"] = True
+
+        ug = r.get("unrealized_gain")
+        if ug is not None:
+            entry["unrealized_gain"] += ug
+            entry["_has_unrealized"] = True
 
         # ── Account-count key ───────────────────────────────────────────────
         # Note: manifest 'label' is not injected into canonical rows
@@ -330,6 +355,21 @@ def compute_positions_summary(
         if abs(reconciliation_delta) >= 0.01:
             uncl = round(uncl + reconciliation_delta, 2)
 
+        # ── Cost-basis output ────────────────────────────────────────────────
+        cost_basis_out = (
+            round(entry["cost_basis"], 2) if entry["_has_cost_basis"] else None
+        )
+        unrealized_gain_out = (
+            round(entry["unrealized_gain"], 2) if entry["_has_unrealized"] else None
+        )
+        # Compute pct from the aggregated totals — NOT by summing per-row %
+        # values (that would be wrong because each row's % is relative to its
+        # own cost basis, not the symbol total).
+        if cost_basis_out and unrealized_gain_out is not None:
+            unrealized_gain_pct = round(unrealized_gain_out / cost_basis_out * 100, 2)
+        else:
+            unrealized_gain_pct = None
+
         result.append({
             "symbol":               entry["_display_symbol"],
             "security_name":        entry["_security_name"],
@@ -345,6 +385,9 @@ def compute_positions_summary(
             # Always 0.00 under normal float arithmetic with real market values.
             "reconciliation_delta": reconciliation_delta,
             "account_count":        len(entry["_account_keys"]),
+            "cost_basis":           cost_basis_out,
+            "unrealized_gain":      unrealized_gain_out,
+            "unrealized_gain_pct":  unrealized_gain_pct,
         })
 
     return sorted(result, key=lambda p: p["market_value"], reverse=True)
@@ -372,14 +415,17 @@ def build_summary(
     Returns:
         Aggregates only — no raw row data is included in the output.
         {
-            "total_market_value":      float,
-            "position_count":          int,
-            "unique_symbols":          int,
-            "top_positions":           [{symbol, weight_pct}, ...],
-            "sector_weights_pct":      {sector: pct, ...},
-            "account_type_split":      {bucket: market_value, ...},
-            "concentration_flags":     [{symbol, weight_pct, flag}, ...],
+            "total_market_value":         float,
+            "position_count":             int,
+            "unique_symbols":             int,
+            "top_positions":              [{symbol, weight_pct}, ...],
+            "sector_weights_pct":         {sector: pct, ...},
+            "account_type_split":         {bucket: market_value, ...},
+            "concentration_flags":        [{symbol, weight_pct, flag}, ...],
             "concentration_threshold_pct": float,
+            "total_cost_basis":           float|None,
+            "total_unrealized_gain":      float|None,
+            "total_unrealized_gain_pct":  float|None,
         }
     """
     total_mv = compute_total_market_value(rows)
@@ -391,6 +437,17 @@ def build_summary(
     # sub-totals that always sum to market_value (reconciliation enforced).
     positions_summary = compute_positions_summary(rows, total_mv)
 
+    # Portfolio-level cost-basis aggregates — summed across per-symbol totals.
+    # Only positions that reported cost_basis / unrealized_gain data contribute.
+    _cb_vals = [p["cost_basis"] for p in positions_summary if p.get("cost_basis") is not None]
+    _ug_vals = [p["unrealized_gain"] for p in positions_summary if p.get("unrealized_gain") is not None]
+    total_cost_basis = round(sum(_cb_vals), 2) if _cb_vals else None
+    total_unrealized_gain = round(sum(_ug_vals), 2) if _ug_vals else None
+    if total_cost_basis and total_unrealized_gain is not None:
+        total_unrealized_gain_pct = round(total_unrealized_gain / total_cost_basis * 100, 2)
+    else:
+        total_unrealized_gain_pct = None
+
     return {
         "total_market_value": round(total_mv, 2),
         "position_count": len(rows),
@@ -400,6 +457,9 @@ def build_summary(
         "account_type_split": compute_account_type_split(rows, account_type_override),
         "concentration_flags": compute_concentration_flags(position_weights, concentration_threshold),
         "concentration_threshold_pct": round(concentration_threshold * 100, 1),
+        "total_cost_basis":          total_cost_basis,
+        "total_unrealized_gain":     total_unrealized_gain,
+        "total_unrealized_gain_pct": total_unrealized_gain_pct,
         "positions_summary": positions_summary,
         # Count of positions where rounding produced a ≥0.01 cent discrepancy.
         # Should always be 0; non-zero value signals a float arithmetic anomaly

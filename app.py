@@ -119,6 +119,15 @@ def main() -> None:
     col2.metric("Positions", summary.get("position_count", 0))
     col3.metric("Unique Symbols", summary.get("unique_symbols", 0))
 
+    # ── Row 1b: Cost-basis metrics ────────────────────────────────────────
+    tcb  = summary.get("total_cost_basis")
+    tug  = summary.get("total_unrealized_gain")
+    tugp = summary.get("total_unrealized_gain_pct")
+    col4, col5, col6 = st.columns(3)
+    col4.metric("Total Cost Basis",    _fmt_cad(tcb)  if tcb  is not None else "—")
+    col5.metric("Unrealized Gain",     _fmt_cad(tug)  if tug  is not None else "—")
+    col6.metric("Unrealized Gain (%)", f"{tugp:.2f}%" if tugp is not None else "—")
+
     st.divider()
 
     # ── Row 2: Sector weights + Account type split ────────────────────────
@@ -243,6 +252,9 @@ def main() -> None:
             "asset_class":          "Asset Class",
             "market_value":         "Market Value",
             "weight_pct":           "Weight (%)",
+            "cost_basis":           "Cost Basis",
+            "unrealized_gain":      "Unrealized Gain",
+            "unrealized_gain_pct":  "Unrealized Gain (%)",
             "registered_value":     "Registered",
             "non_registered_value": "Non-Reg",
             "unclassified_value":   "Unclassified",
@@ -257,6 +269,15 @@ def main() -> None:
                 ),
                 "Weight (%)": st.column_config.NumberColumn(
                     "Weight (%)", format="%.2f%%"
+                ),
+                "Cost Basis": st.column_config.NumberColumn(
+                    "Cost Basis ($)", format="$%,.2f"
+                ),
+                "Unrealized Gain": st.column_config.NumberColumn(
+                    "Unrealized Gain ($)", format="$%,.2f"
+                ),
+                "Unrealized Gain (%)": st.column_config.NumberColumn(
+                    "Unrealized Gain (%)", format="%.2f%%"
                 ),
                 "Registered": st.column_config.NumberColumn(
                     "Registered ($)", format="$%,.2f"

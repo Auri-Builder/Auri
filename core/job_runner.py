@@ -497,8 +497,13 @@ def handle_portfolio_snapshot_v0(params: dict) -> dict:
         "concentration_flags":         summary.get("concentration_flags", []),
         "concentration_threshold_pct": summary.get("concentration_threshold_pct"),
         "accounts_loaded":             summary.get("accounts_loaded", []),
+        # Portfolio-level cost-basis aggregates (None when no rows report cost_basis).
+        "total_cost_basis":            summary.get("total_cost_basis"),
+        "total_unrealized_gain":       summary.get("total_unrealized_gain"),
+        "total_unrealized_gain_pct":   summary.get("total_unrealized_gain_pct"),
         # GOVERNANCE: positions_summary is aggregates only (per-symbol totals,
         # registered/non-registered/unclassified sub-totals, account count,
+        # cost_basis / unrealized_gain / unrealized_gain_pct per symbol,
         # reconciliation_delta diagnostic field).
         # No row-level holdings data is written to the derived output.
         "positions_summary":                  summary.get("positions_summary", []),
