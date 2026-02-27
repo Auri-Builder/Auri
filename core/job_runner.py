@@ -1,3 +1,4 @@
+import re
 import time
 import json
 import uuid
@@ -43,6 +44,17 @@ SAFE_PORTFOLIO_DIR = (PROJECT_ROOT / "data" / "portfolio").resolve()
 
 # Canonical location of the accounts manifest (already inside SAFE_PORTFOLIO_DIR).
 ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
+
+# ---------------------------------------------------------------------------
+# SAFE_DERIVED_DIR
+#
+# SECURITY PRINCIPLE: Separate sandbox for derived outputs.
+#
+# Snapshot files are written here — aggregates only, never row-level data.
+# Comparisons may only load files from this directory.
+# Path validation mirrors the CSV sandbox: symlink-safe is_relative_to() check.
+# ---------------------------------------------------------------------------
+SAFE_DERIVED_DIR = (PROJECT_ROOT / "data" / "derived").resolve()
 
 # Symbol reference file — public market data, tracked in git, optional.
 # Stored under refs/ (not data/) so it is not caught by the data/* gitignore rule.
@@ -397,6 +409,205 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# _resolve_one_derived_json
+#
+# SECURITY PRINCIPLE: Snapshot sandbox enforcement.
+#
+# Mirrors _resolve_one_csv but scoped to data/derived/ and .json files only.
+# Prevents compare jobs from reading arbitrary JSON files outside derived/.
+# ---------------------------------------------------------------------------
+
+def _resolve_one_derived_json(raw: str) -> "Path | dict":
+    """Resolve and sandbox a single snapshot path string."""
+    if not isinstance(raw, str) or not raw.strip():
+        return {"error": f"Snapshot path must be a non-empty string, got: {raw!r}"}
+
+    resolved = (PROJECT_ROOT / raw.strip()).resolve()
+
+    if not resolved.is_relative_to(SAFE_DERIVED_DIR):
+        return {"error": f"Snapshot path is outside data/derived/: {raw!r}"}
+
+    if not resolved.exists():
+        return {"error": f"Snapshot file not found: {resolved.name}"}
+
+    if resolved.suffix.lower() != ".json":
+        return {"error": f"Only .json snapshot files are permitted, got: {resolved.name}"}
+
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# handle_portfolio_snapshot_v0
+#
+# SECURITY PRINCIPLE: Aggregates-only persistence.
+#
+# Calls the existing summary pipeline and writes a sanitized JSON to
+# data/derived/. The output schema is explicitly whitelisted — only
+# aggregate fields are written, never row-level holdings data.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_snapshot_v0(params: dict) -> dict:
+    """
+    Run portfolio_summary_v0 (auto-load all accounts) and persist the
+    aggregates-only output to data/derived/<date>-<label>-summary.json.
+
+    Optional params:
+        label (str): descriptive tag embedded in the filename.
+                     Default: "snapshot". Sanitized to [a-zA-Z0-9_-] only.
+        date  (str): YYYY-MM-DD to embed in the filename. Default: today.
+
+    Returns:
+        {"snapshot_file": "data/derived/<filename>", "summary": <aggregates>}
+    """
+    # --- Validate label ---
+    raw_label = params.get("label", "snapshot")
+    if not isinstance(raw_label, str) or not raw_label.strip():
+        return {"error": "label must be a non-empty string"}
+    safe_label = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_label.strip())
+
+    # --- Validate date ---
+    raw_date = params.get("date")
+    if raw_date is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    else:
+        if not isinstance(raw_date, str):
+            return {"error": "date must be a YYYY-MM-DD string"}
+        try:
+            datetime.strptime(raw_date, "%Y-%m-%d")
+        except ValueError:
+            return {"error": "date must be in YYYY-MM-DD format"}
+        date_str = raw_date
+
+    # --- Run summary pipeline (auto-load all accounts) ---
+    summary = handle_portfolio_summary_v0({})
+    if "error" in summary:
+        return summary
+
+    # --- Build snapshot — whitelist aggregate fields only, no row data ---
+    snapshot = {
+        "timestamp":                   datetime.now().isoformat(timespec="seconds"),
+        "label":                       safe_label,
+        "date":                        date_str,
+        "total_market_value":          summary.get("total_market_value"),
+        "position_count":              summary.get("position_count"),
+        "unique_symbols":              summary.get("unique_symbols"),
+        "top_positions":               summary.get("top_positions", []),
+        "sector_weights_pct":          summary.get("sector_weights_pct", {}),
+        "account_type_split":          summary.get("account_type_split", {}),
+        "concentration_flags":         summary.get("concentration_flags", []),
+        "concentration_threshold_pct": summary.get("concentration_threshold_pct"),
+        "accounts_loaded":             summary.get("accounts_loaded", []),
+    }
+
+    # --- Write to data/derived/ ---
+    SAFE_DERIVED_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{date_str}-{safe_label}-summary.json"
+    out_path = SAFE_DERIVED_DIR / filename
+    out_path.write_text(json.dumps(snapshot, indent=2))
+
+    return {
+        "snapshot_file": f"data/derived/{filename}",
+        "summary": snapshot,
+    }
+
+
+# ---------------------------------------------------------------------------
+# handle_portfolio_compare_v0
+#
+# SECURITY PRINCIPLE: Read-only, sandbox-validated paths, no row data.
+#
+# Both snapshot paths must resolve inside SAFE_DERIVED_DIR.
+# Output is a computed diff of aggregates — no raw holdings are loaded.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_compare_v0(params: dict) -> dict:
+    """
+    Compare two snapshot files produced by portfolio_snapshot_v0.
+
+    Required params:
+        snapshot_a (str): relative path, e.g. "data/derived/2024-01-01-before-summary.json"
+        snapshot_b (str): relative path to the newer snapshot
+
+    Returns:
+        {
+            "snapshot_a":               str (filename),
+            "snapshot_b":               str (filename),
+            "delta_total_market_value": float,
+            "top_position_changes":     [{symbol, weight_pct_a, weight_pct_b, delta_pct}],
+            "sector_drift":             [{sector, weight_pct_a, weight_pct_b, delta_pct}],
+            "concentration_changes":    {newly_flagged: [...], dropped_below: [...]},
+        }
+    """
+    raw_a = params.get("snapshot_a")
+    raw_b = params.get("snapshot_b")
+
+    if not raw_a or not raw_b:
+        return {"error": "snapshot_a and snapshot_b are both required"}
+
+    path_a_or_err = _resolve_one_derived_json(raw_a)
+    if isinstance(path_a_or_err, dict):
+        return path_a_or_err
+    path_b_or_err = _resolve_one_derived_json(raw_b)
+    if isinstance(path_b_or_err, dict):
+        return path_b_or_err
+
+    path_a, path_b = path_a_or_err, path_b_or_err
+
+    try:
+        snap_a = json.loads(path_a.read_text(encoding="utf-8"))
+        snap_b = json.loads(path_b.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return {"error": f"Failed to read snapshot: {exc}"}
+
+    # delta total market value
+    mv_a = snap_a.get("total_market_value") or 0
+    mv_b = snap_b.get("total_market_value") or 0
+    delta_mv = round(mv_b - mv_a, 2)
+
+    # top position changes — union of symbols from both snapshots
+    pos_a = {p["symbol"]: p["weight_pct"] for p in snap_a.get("top_positions", [])}
+    pos_b = {p["symbol"]: p["weight_pct"] for p in snap_b.get("top_positions", [])}
+    top_changes = [
+        {
+            "symbol":      sym,
+            "weight_pct_a": pos_a.get(sym),
+            "weight_pct_b": pos_b.get(sym),
+            "delta_pct":   round((pos_b.get(sym) or 0) - (pos_a.get(sym) or 0), 2),
+        }
+        for sym in sorted(set(pos_a) | set(pos_b))
+    ]
+
+    # sector drift — union of sectors from both snapshots
+    sec_a = snap_a.get("sector_weights_pct", {})
+    sec_b = snap_b.get("sector_weights_pct", {})
+    sector_drift = [
+        {
+            "sector":      sec,
+            "weight_pct_a": sec_a.get(sec),
+            "weight_pct_b": sec_b.get(sec),
+            "delta_pct":   round((sec_b.get(sec) or 0) - (sec_a.get(sec) or 0), 2),
+        }
+        for sec in sorted(set(sec_a) | set(sec_b))
+    ]
+
+    # concentration changes
+    flags_a = {f["symbol"] for f in snap_a.get("concentration_flags", [])}
+    flags_b = {f["symbol"] for f in snap_b.get("concentration_flags", [])}
+
+    return {
+        "snapshot_a":               path_a.name,
+        "snapshot_b":               path_b.name,
+        "delta_total_market_value": delta_mv,
+        "top_position_changes":     top_changes,
+        "sector_drift":             sector_drift,
+        "concentration_changes": {
+            "newly_flagged": sorted(flags_b - flags_a),
+            "dropped_below": sorted(flags_a - flags_b),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # ACTION REGISTRY
 #
 # SECURITY PRINCIPLE:
@@ -408,10 +619,12 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
 # If an action is not listed here, it will be marked as "denied".
 # ---------------------------------------------------------------------------
 ACTION_HANDLERS = {
-    "ping":                    handle_ping,
-    "list_dir":                handle_list_dir,
-    "portfolio_import_v0":     handle_portfolio_import_v0,
-    "portfolio_summary_v0":    handle_portfolio_summary_v0,
+    "ping":                      handle_ping,
+    "list_dir":                  handle_list_dir,
+    "portfolio_import_v0":       handle_portfolio_import_v0,
+    "portfolio_summary_v0":      handle_portfolio_summary_v0,
+    "portfolio_snapshot_v0":     handle_portfolio_snapshot_v0,
+    "portfolio_compare_v0":      handle_portfolio_compare_v0,
 }
 
 

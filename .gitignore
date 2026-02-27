@@ -11,6 +11,11 @@ models/*
 !data/.gitkeep
 !data/portfolio/
 !data/portfolio/.gitkeep
+!data/derived/
+!data/derived/.gitkeep
+
+# Derived outputs (aggregates only, never commit)
+data/derived/*.json
 !inbox/.gitkeep
 !outbox/.gitkeep
 !processing/.gitkeep
@@ -38,3 +43,6 @@ __pycache__/
 
 # IDE
 .vscode/
+
+# Local dashboard overrides (never commit)
+dashboard.yaml
