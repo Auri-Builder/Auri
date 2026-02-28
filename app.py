@@ -80,6 +80,39 @@ def load_summary() -> dict:
     return result["output"]  # unwrap the job envelope
 
 
+def _generate_commentary() -> dict:
+    """
+    Call portfolio_commentary_v0 — direct in dev mode, governed queue otherwise.
+    Returns the handler dict (may contain "error" key).
+    """
+    dash_cfg = _load_dashboard_config()
+
+    if dash_cfg.get("dev_direct_call"):
+        from core.job_runner import handle_portfolio_commentary_v0  # noqa: PLC0415
+        return handle_portfolio_commentary_v0({})
+
+    from core.oricore import submit_and_wait  # noqa: PLC0415
+
+    result = submit_and_wait(
+        "portfolio_commentary_v0",
+        {},
+        {"approval_required": False},
+        timeout=180,  # LLM calls can be slow
+    )
+
+    if result is None:
+        return {
+            "error": (
+                "Commentary job timed out — is the job runner active?\n\n"
+                "Start it with:  python -m core.job_runner"
+            )
+        }
+    if result.get("status") != "ok":
+        return {"error": result.get("error", "Commentary job failed with unknown error")}
+
+    return result["output"]
+
+
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
@@ -101,9 +134,10 @@ def main() -> None:
     st.title("ORI Portfolio Dashboard")
     st.caption("ORI_IA v0.1 · local only · no network calls")
 
-    # Refresh clears the cache and immediately re-runs.
+    # Refresh clears the summary cache and any stale commentary.
     if st.button("Refresh"):
         load_summary.clear()
+        st.session_state.pop("commentary", None)
         st.rerun()
 
     with st.spinner("Loading portfolio summary…"):
@@ -339,6 +373,31 @@ def main() -> None:
             hide_index=True,
         )
         st.caption(f"Showing {len(filtered)} of {len(pos_df)} positions")
+
+    # ── Row 6: Portfolio Commentary ───────────────────────────────────────
+    st.divider()
+    st.subheader("Portfolio Commentary")
+
+    _c_btn, _c_clr = st.columns([1, 6])
+    with _c_btn:
+        if st.button("Generate Commentary"):
+            with st.spinner("Generating commentary — this may take up to a minute…"):
+                st.session_state["commentary"] = _generate_commentary()
+    with _c_clr:
+        if st.session_state.get("commentary") and st.button("Clear"):
+            st.session_state.pop("commentary", None)
+            st.rerun()
+
+    _commentary_result = st.session_state.get("commentary")
+    if _commentary_result:
+        if "error" in _commentary_result:
+            st.error(_commentary_result["error"])
+        else:
+            st.markdown(_commentary_result["commentary"])
+            st.caption(
+                f"Provider: {_commentary_result.get('provider_used', '—')}  ·  "
+                f"Prompt: {_commentary_result.get('prompt_length', 0):,} chars"
+            )
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.divider()

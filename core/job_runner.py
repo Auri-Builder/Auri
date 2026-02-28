@@ -61,6 +61,10 @@ SAFE_DERIVED_DIR = (PROJECT_ROOT / "data" / "derived").resolve()
 # Enriches sector/asset_class fields that broker CSV exports typically omit.
 SYMBOL_REF_PATH = (PROJECT_ROOT / "refs" / "symbols.yaml").resolve()
 
+# LLM provider config (gitignored — API keys must never be stored here).
+# Absent → local Ollama default.  Present → overrides provider / model.
+LLM_CONFIG_PATH = (PROJECT_ROOT / "llm_config.yaml").resolve()
+
 # ---------------------------------------------------------------------------
 # handle_list_dir
 #
@@ -621,6 +625,87 @@ def handle_portfolio_compare_v0(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# _load_llm_config
+# ---------------------------------------------------------------------------
+
+def _load_llm_config() -> dict:
+    """
+    Load llm_config.yaml if present; return {} (local default) if absent.
+    Returns {"error": ...} on parse failure.
+    """
+    if not LLM_CONFIG_PATH.exists():
+        return {}
+    try:
+        with LLM_CONFIG_PATH.open("r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except yaml.YAMLError as exc:
+        return {"error": f"llm_config.yaml parse error: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# handle_portfolio_commentary_v0
+#
+# SECURITY PRINCIPLE: Strict data whitelist before LLM call.
+#
+# The commentary module (agents/ori_ia/commentary.py) enforces an explicit
+# field whitelist — only aggregate totals and per-symbol analytics reach
+# the LLM.  No account identifiers, file paths, or institution names are
+# forwarded.  The LLM adapter defaults to local Ollama (no network egress)
+# unless the user has explicitly opted in to a cloud provider via
+# llm_config.yaml.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_commentary_v0(params: dict) -> dict:
+    """
+    Generate LLM observations and clarifying questions for the current portfolio.
+
+    Calls portfolio_summary_v0 internally (auto-loads all manifest accounts),
+    applies the strict data whitelist in commentary.py, then calls the
+    configured LLM adapter.
+
+    Optional params: (none — uses auto-load and llm_config.yaml settings)
+
+    Returns:
+        {
+            "commentary":    str  — Markdown-formatted LLM response,
+            "provider_used": str  — e.g. "local/llama3.2",
+            "prompt_length": int  — character count (diagnostic),
+        }
+    """
+    _ = params  # reserved for future options (model_override, style, etc.)
+
+    # Load LLM config (absent → local default)
+    llm_cfg = _load_llm_config()
+    if "error" in llm_cfg:
+        return llm_cfg
+
+    # Build adapter
+    try:
+        from agents.ori_ia.llm_adapter import get_adapter  # noqa: PLC0415
+        adapter = get_adapter(llm_cfg)
+    except Exception as exc:
+        return {"error": f"LLM adapter init failed: {exc}"}
+
+    # Run the full summary pipeline (auto-load all accounts)
+    summary = handle_portfolio_summary_v0({})
+    if "error" in summary:
+        return summary
+
+    # Generate commentary — whitelist enforced inside commentary.py
+    try:
+        from agents.ori_ia.commentary import generate_commentary  # noqa: PLC0415
+        result = generate_commentary(summary, adapter)
+    except Exception as exc:
+        return {"error": f"Commentary generation failed: {exc}"}
+
+    return {
+        "commentary":    result["commentary"],
+        "provider_used": adapter.provider_label,
+        "prompt_length": result["prompt_length"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # ACTION REGISTRY
 #
 # SECURITY PRINCIPLE:
@@ -632,12 +717,13 @@ def handle_portfolio_compare_v0(params: dict) -> dict:
 # If an action is not listed here, it will be marked as "denied".
 # ---------------------------------------------------------------------------
 ACTION_HANDLERS = {
-    "ping":                      handle_ping,
-    "list_dir":                  handle_list_dir,
-    "portfolio_import_v0":       handle_portfolio_import_v0,
-    "portfolio_summary_v0":      handle_portfolio_summary_v0,
-    "portfolio_snapshot_v0":     handle_portfolio_snapshot_v0,
-    "portfolio_compare_v0":      handle_portfolio_compare_v0,
+    "ping":                        handle_ping,
+    "list_dir":                    handle_list_dir,
+    "portfolio_import_v0":         handle_portfolio_import_v0,
+    "portfolio_summary_v0":        handle_portfolio_summary_v0,
+    "portfolio_snapshot_v0":       handle_portfolio_snapshot_v0,
+    "portfolio_compare_v0":        handle_portfolio_compare_v0,
+    "portfolio_commentary_v0":     handle_portfolio_commentary_v0,
 }
 
 

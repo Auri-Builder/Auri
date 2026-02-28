@@ -46,3 +46,7 @@ __pycache__/
 
 # Local dashboard overrides (never commit)
 dashboard.yaml
+
+# LLM provider config — may contain model names and provider choices
+# API keys must never be stored here; read from env vars only
+llm_config.yaml
