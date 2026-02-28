@@ -207,6 +207,34 @@ def main() -> None:
     else:
         pos_df = pd.DataFrame(positions)
 
+        # ── P&L summary strip ─────────────────────────────────────────────
+        # Computed from the full positions list — not affected by filters below.
+        _ug_vals  = [p["unrealized_gain"]     for p in positions if p.get("unrealized_gain")     is not None]
+        _ugp_vals = [p["unrealized_gain_pct"] for p in positions if p.get("unrealized_gain_pct") is not None]
+
+        _best_gain  = max(_ug_vals)  if _ug_vals  else None
+        _worst_loss = min(_ug_vals)  if _ug_vals  else None
+        _high_pct   = max(_ugp_vals) if _ugp_vals else None
+        _low_pct    = min(_ugp_vals) if _ugp_vals else None
+
+        _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+        _sc1.metric(
+            "Largest Gain ($)",
+            _fmt_cad(_best_gain)  if _best_gain  is not None and _best_gain  > 0 else "—",
+        )
+        _sc2.metric(
+            "Largest Loss ($)",
+            _fmt_cad(_worst_loss) if _worst_loss is not None and _worst_loss < 0 else "—",
+        )
+        _sc3.metric(
+            "Highest Unrealized (%)",
+            f"{_high_pct:.2f}%"   if _high_pct  is not None and _high_pct  > 0 else "—",
+        )
+        _sc4.metric(
+            "Lowest Unrealized (%)",
+            f"{_low_pct:.2f}%"    if _low_pct   is not None and _low_pct   < 0 else "—",
+        )
+
         # ── Filter controls ───────────────────────────────────────────────
         sectors       = sorted(pos_df["sector"].unique().tolist())
         asset_classes = sorted(pos_df["asset_class"].unique().tolist())
@@ -245,36 +273,54 @@ def main() -> None:
         elif acct_filter == "Unclassified only":
             mask &= pos_df["unclassified_value"] > 0
 
-        filtered = pos_df[mask].drop(columns=["reconciliation_delta"], errors="ignore").rename(columns={
-            "symbol":               "Symbol",
-            "security_name":        "Security",
-            "sector":               "Sector",
-            "asset_class":          "Asset Class",
-            "market_value":         "Market Value",
-            "weight_pct":           "Weight (%)",
-            "cost_basis":           "Cost Basis",
-            "unrealized_gain":      "Unrealized Gain",
-            "unrealized_gain_pct":  "Unrealized Gain (%)",
-            "registered_value":     "Registered",
-            "non_registered_value": "Non-Reg",
-            "unclassified_value":   "Unclassified",
-            "account_count":        "Accounts",
-        })
+        filtered = (
+            pos_df[mask]
+            .drop(columns=["reconciliation_delta"], errors="ignore")
+            .rename(columns={
+                "symbol":               "Symbol",
+                "security_name":        "Security",
+                "sector":               "Sector",
+                "asset_class":          "Asset Class",
+                "market_value":         "Market Value",
+                "weight_pct":           "Weight (%)",
+                "cost_basis":           "Cost Basis",
+                "unrealized_gain":      "Unrealized Gain",
+                "unrealized_gain_pct":  "Unrealized Gain (%)",
+                "registered_value":     "Registered",
+                "non_registered_value": "Non-Reg",
+                "unclassified_value":   "Unclassified",
+                "account_count":        "Accounts",
+            })
+            .sort_values("Market Value", ascending=False)
+        )
+
+        # ── P&L conditional formatting ─────────────────────────────────────
+        # Soft green for gains, soft red for losses, blank for None / zero.
+        # Applied to the "Unrealized Gain" column only — keeps the table clean.
+        def _color_gain_col(col):
+            return [
+                "background-color: #e8f5e9" if not pd.isna(v) and v > 0
+                else "background-color: #fdecea" if not pd.isna(v) and v < 0
+                else ""
+                for v in col
+            ]
+
+        styled = filtered.style.apply(_color_gain_col, subset=["Unrealized Gain"])
 
         st.dataframe(
-            filtered,
+            styled,
             column_config={
                 "Market Value": st.column_config.NumberColumn(
-                    "Market Value ($)", format="$%,.2f"
+                    "Market Value ($)", format="%.2f"
                 ),
                 "Weight (%)": st.column_config.NumberColumn(
                     "Weight (%)", format="%.2f%%"
                 ),
                 "Cost Basis": st.column_config.NumberColumn(
-                    "Cost Basis ($)", format="$%,.2f"
+                    "Cost Basis ($)", format="%.2f"
                 ),
                 "Unrealized Gain": st.column_config.NumberColumn(
-                    "Unrealized Gain ($)", format="$%,.2f"
+                    "Unrealized Gain ($)", format="%.2f"
                 ),
                 "Unrealized Gain (%)": st.column_config.NumberColumn(
                     "Unrealized Gain (%)", format="%.2f%%"
