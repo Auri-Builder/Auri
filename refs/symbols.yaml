@@ -1,4 +1,4 @@
-# ORI_IA symbol reference — sector/asset_class enrichment
+# ORI_IA symbol reference — sector/asset_class enrichment + Yahoo Finance mapping
 #
 # Public market identifier data — safe to track in git.
 # CSV-supplied values always take priority; this file fills gaps only.
@@ -14,51 +14,59 @@
 #
 # Asset class taxonomy:
 #   Equity, ETF, REIT, LP, Trust, Structured Note, Mutual Fund
+#
+# yahoo_symbol (optional):
+#   Explicit Yahoo Finance ticker override.
+#   - Omit for standard TSX equities — market_data.py appends ".TO" automatically.
+#   - Set to the Yahoo ticker string for US, OTC, TSX-V, or non-standard symbols.
+#   - Set to null to disable market data fetching (structured notes, money market).
+#   Unit trust convention: "AP.UN" → "AP-UN.TO" (Yahoo uses "-" not ".")
+#   TSX Venture: append ".V" instead of ".TO"
 
 symbols:
 
   # ---------------------------------------------------------------------------
-  # ETFs
+  # ETFs (TSX — yahoo_symbol auto-resolved as SYMBOL.TO)
   # ---------------------------------------------------------------------------
-  ZWK:  {sector: "Financials",              asset_class: "ETF"}  # BMO Covered Call Canadian Banks ETF
-  VFV:  {sector: "Equities - US",           asset_class: "ETF"}  # Vanguard S&P 500 Index ETF (CAD)
-  ZWC:  {sector: "Equities - Canada",       asset_class: "ETF"}  # BMO Canadian High Dividend Covered Call ETF
-  ZBK:  {sector: "Financials",              asset_class: "ETF"}  # BMO Equal Weight US Banks ETF (hedged)
-  HHL:  {sector: "Healthcare",              asset_class: "ETF"}  # Harvest Healthcare Leaders Income ETF
-  ZEB:  {sector: "Financials",              asset_class: "ETF"}  # BMO Equal Weight Banks ETF
+  ZWK:  {sector: "Financials",              asset_class: "ETF"}   # BMO Covered Call Canadian Banks ETF
+  VFV:  {sector: "Equities - US",           asset_class: "ETF"}   # Vanguard S&P 500 Index ETF (CAD)
+  ZWC:  {sector: "Equities - Canada",       asset_class: "ETF"}   # BMO Canadian High Dividend Covered Call ETF
+  ZBK:  {sector: "Financials",              asset_class: "ETF"}   # BMO Equal Weight US Banks ETF (hedged)
+  HHL:  {sector: "Healthcare",              asset_class: "ETF"}   # Harvest Healthcare Leaders Income ETF
+  ZEB:  {sector: "Financials",              asset_class: "ETF"}   # BMO Equal Weight Banks ETF
 
   # ---------------------------------------------------------------------------
   # Equities (individual stocks)
   # ---------------------------------------------------------------------------
-  BAM:   {sector: "Financials",             asset_class: "Equity"}  # Brookfield Asset Management
-  TOU:   {sector: "Energy",                asset_class: "Equity"}  # Tourmaline Oil Corp
-  ENB:   {sector: "Energy",                asset_class: "Equity"}  # Enbridge Inc
-  T:     {sector: "Communications",        asset_class: "Equity"}  # TELUS Corporation
-  EQIX:  {sector: "Real Estate",           asset_class: "Equity"}  # Equinix Inc (US data centre REIT)
-  TSLA:  {sector: "Consumer Discretionary", asset_class: "Equity"} # Tesla Inc
-  WCP:   {sector: "Energy",                asset_class: "Equity"}  # Whitecap Resources
-  UURAF: {sector: "Energy",                asset_class: "Equity"}  # Ur-Energy Inc (OTC)
+  BAM:   {sector: "Financials",              asset_class: "Equity"}              # Brookfield Asset Management (TSX)
+  TOU:   {sector: "Energy",                  asset_class: "Equity"}              # Tourmaline Oil Corp (TSX)
+  ENB:   {sector: "Energy",                  asset_class: "Equity"}              # Enbridge Inc (TSX)
+  T:     {sector: "Communications",          asset_class: "Equity"}              # TELUS Corporation (TSX — T.TO, not AT&T)
+  WCP:   {sector: "Energy",                  asset_class: "Equity"}              # Whitecap Resources (TSX)
+  EQIX:  {sector: "Real Estate",             asset_class: "Equity", yahoo_symbol: "EQIX"}   # Equinix Inc (NASDAQ)
+  TSLA:  {sector: "Consumer Discretionary",  asset_class: "Equity", yahoo_symbol: "TSLA"}   # Tesla Inc (NASDAQ)
+  UURAF: {sector: "Energy",                  asset_class: "Equity", yahoo_symbol: "UURAF"}  # Ur-Energy Inc (OTC)
 
   # ---------------------------------------------------------------------------
-  # REITs
+  # REITs — unit trust convention: SYMBOL.UN → SYMBOL-UN.TO on Yahoo
   # ---------------------------------------------------------------------------
-  CRT.UN: {sector: "Real Estate",          asset_class: "REIT"}   # CT Real Estate Investment Trust
-  AP.UN:  {sector: "Real Estate",          asset_class: "REIT"}   # Allied Properties REIT
+  CRT.UN: {sector: "Real Estate",  asset_class: "REIT",  yahoo_symbol: "CRT-UN.TO"}  # CT Real Estate Investment Trust
+  AP.UN:  {sector: "Real Estate",  asset_class: "REIT",  yahoo_symbol: "AP-UN.TO"}   # Allied Properties REIT
 
   # ---------------------------------------------------------------------------
   # Trusts and Limited Partnerships
   # ---------------------------------------------------------------------------
-  CHE.UN: {sector: "Materials",            asset_class: "Trust"}  # Chemtrade Logistics Income Fund
-  AD.UN:  {sector: "Financials",           asset_class: "Trust"}  # Alaris Equity Partners Income Trust
-  BEP.UN: {sector: "Utilities",            asset_class: "LP"}     # Brookfield Renewable Partners LP
+  CHE.UN: {sector: "Materials",   asset_class: "Trust", yahoo_symbol: "CHE-UN.TO"}  # Chemtrade Logistics Income Fund
+  AD.UN:  {sector: "Financials",  asset_class: "Trust", yahoo_symbol: "AD-UN.TO"}   # Alaris Equity Partners Income Trust
+  BEP.UN: {sector: "Utilities",   asset_class: "LP",    yahoo_symbol: "BEP-UN.TO"}  # Brookfield Renewable Partners LP
 
   # ---------------------------------------------------------------------------
-  # Fixed Income / Funds
+  # Fixed Income / Funds — no market data available
   # ---------------------------------------------------------------------------
-  NPP5502: {sector: "Fixed Income",        asset_class: "Structured Note"}  # TD structured product
-  TDB8151: {sector: "Money Market",        asset_class: "Mutual Fund"}       # TD money market fund
+  NPP5502: {sector: "Fixed Income",  asset_class: "Structured Note", yahoo_symbol: null}  # TD structured product
+  TDB8151: {sector: "Money Market",  asset_class: "Mutual Fund",     yahoo_symbol: null}  # TD money market fund
 
   # ---------------------------------------------------------------------------
   # TSX Venture
   # ---------------------------------------------------------------------------
-  UCU: {sector: "Energy",                 asset_class: "Equity"}  # Uranium Creek Corp (UCU.V — uranium exploration)
+  UCU: {sector: "Energy",  asset_class: "Equity",  yahoo_symbol: "UCU.V"}  # Uranium Creek Corp (TSX-V)
