@@ -1,0 +1,147 @@
+# ORI Personal — Risk-Profiling Questionnaire
+# This file is a TEMPLATE tracked in git. It contains no personal data.
+# Jeff's answers live in data/portfolio/answers.yaml (gitignored).
+#
+# answer_type:
+#   choice  — pick one value from the `options` list
+#   int     — integer value within [min, max]
+#   float   — decimal value within [min, max]
+#
+# scoring_rule:
+#   map     — answer value maps to a score via `scores` dict
+#   linear  — score = (answer - min) / (max - min) * 100
+#   inverse — score = 100 - linear  (higher answer = lower risk score)
+#
+# Each question contributes weight points to the final risk_score (0–100).
+# Total weight across all questions should sum to 100.
+
+version: "1.0"
+
+questions:
+
+  - question_id: q01
+    question_text: >
+      What is your primary investment goal?
+    answer_type: choice
+    options:
+      - capital_preservation    # protect what you have
+      - income                  # regular income stream
+      - balanced                # blend of income and growth
+      - growth                  # long-term appreciation
+      - aggressive_growth       # maximum long-term appreciation
+    weight: 20
+    scoring_rule:
+      type: map
+      scores:
+        capital_preservation: 10
+        income: 25
+        balanced: 50
+        growth: 75
+        aggressive_growth: 95
+
+  - question_id: q02
+    question_text: >
+      How long do you expect to keep the majority of your invested assets
+      before needing to draw them down significantly?
+    answer_type: choice
+    options:
+      - less_than_2_years
+      - 2_to_5_years
+      - 5_to_10_years
+      - 10_to_20_years
+      - more_than_20_years
+    weight: 15
+    scoring_rule:
+      type: map
+      scores:
+        less_than_2_years: 5
+        2_to_5_years: 20
+        5_to_10_years: 45
+        10_to_20_years: 70
+        more_than_20_years: 90
+
+  - question_id: q03
+    question_text: >
+      If your portfolio lost 20% of its value in a single year, what would
+      you most likely do?
+    answer_type: choice
+    options:
+      - sell_everything         # cannot tolerate that level of loss
+      - sell_some               # reduce exposure significantly
+      - hold                    # stay the course and wait for recovery
+      - buy_more                # opportunistically add at lower prices
+    weight: 20
+    scoring_rule:
+      type: map
+      scores:
+        sell_everything: 5
+        sell_some: 25
+        hold: 60
+        buy_more: 90
+
+  - question_id: q04
+    question_text: >
+      What percentage of your annual living expenses is covered by
+      guaranteed income sources (pension, CPP, OAS, annuity)?
+    answer_type: int
+    min: 0
+    max: 100
+    unit: percent
+    weight: 15
+    scoring_rule:
+      # More guaranteed income → can tolerate more portfolio volatility
+      type: linear
+      min: 0
+      max: 100
+
+  - question_id: q05
+    question_text: >
+      What maximum percentage decline in your total portfolio value could
+      you tolerate in a single calendar year without being forced to change
+      your withdrawal plan?
+    answer_type: int
+    min: 0
+    max: 60
+    unit: percent
+    weight: 15
+    scoring_rule:
+      # Higher drawdown tolerance → higher risk score
+      type: linear
+      min: 0
+      max: 60
+
+  - question_id: q06
+    question_text: >
+      How important is it to you to leave a financial legacy for your
+      children or other beneficiaries?
+    answer_type: choice
+    options:
+      - not_important           # spend it all, legacy not a priority
+      - somewhat_important      # nice to have if possible
+      - important               # a meaningful transfer is a goal
+      - very_important          # wealth transfer is a primary objective
+    weight: 10
+    scoring_rule:
+      # Stronger legacy motive → longer effective time horizon → higher risk score
+      type: map
+      scores:
+        not_important: 30
+        somewhat_important: 50
+        important: 70
+        very_important: 85
+
+  - question_id: q07
+    question_text: >
+      How many years of living expenses do you currently hold in low-risk
+      liquid assets (cash, GICs, short-term bonds) outside of your main
+      investment portfolio?
+    answer_type: float
+    min: 0.0
+    max: 10.0
+    unit: years
+    weight: 5
+    scoring_rule:
+      # More liquidity buffer → can tolerate more equity volatility
+      type: linear
+      min: 0.0
+      max: 10.0
