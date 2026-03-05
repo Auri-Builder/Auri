@@ -270,6 +270,7 @@ def compute_positions_summary(
                 "_sector":            None,
                 "_asset_class":       None,
                 "market_value":       0.0,
+                "quantity":           0.0,
                 "registered_value":   0.0,
                 "non_registered_value": 0.0,
                 "unclassified_value": 0.0,
@@ -283,6 +284,7 @@ def compute_positions_summary(
 
         entry = accum[key]
         entry["market_value"] += mv
+        entry["quantity"]     += r.get("quantity") or 0.0
 
         # First non-None descriptive value encountered wins for each field.
         if entry["_security_name"] is None and raw_name:
@@ -376,6 +378,7 @@ def compute_positions_summary(
             "sector":               entry["_sector"] or "unknown",
             "asset_class":          entry["_asset_class"] or "unknown",
             "market_value":         mv,
+            "quantity":             round(entry["quantity"], 4),
             "weight_pct":           round((mv / total_mv) * 100, 2),
             "registered_value":     reg,
             "non_registered_value": nreg,

@@ -309,7 +309,7 @@ class TestComputePositionsSummaryOutputShape(unittest.TestCase):
         result = compute_positions_summary(rows, total_mv=1000.0)
         required_keys = {
             "symbol", "security_name", "sector", "asset_class",
-            "market_value", "weight_pct", "registered_value",
+            "market_value", "quantity", "weight_pct", "registered_value",
             "non_registered_value", "unclassified_value",
             "reconciliation_delta", "account_count",
             "cost_basis", "unrealized_gain", "unrealized_gain_pct",

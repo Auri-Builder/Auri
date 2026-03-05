@@ -80,6 +80,26 @@ def load_summary() -> dict:
     return result["output"]  # unwrap the job envelope
 
 
+def _fetch_prices() -> dict:
+    """
+    Call portfolio_prices_v0 — direct in dev mode, governed queue otherwise.
+    *** Makes outbound network calls to Yahoo Finance. ***
+    """
+    dash_cfg = _load_dashboard_config()
+    if dash_cfg.get("dev_direct_call"):
+        from core.job_runner import handle_portfolio_prices_v0  # noqa: PLC0415
+        return handle_portfolio_prices_v0({})
+    from core.oricore import submit_and_wait  # noqa: PLC0415
+    result = submit_and_wait(
+        "portfolio_prices_v0", {}, {"approval_required": False}, timeout=120
+    )
+    if result is None:
+        return {"error": "Price fetch job timed out."}
+    if result.get("status") != "ok":
+        return {"error": result.get("error", "Price fetch job failed.")}
+    return result["output"]
+
+
 def _generate_commentary() -> dict:
     """
     Call portfolio_commentary_v0 — direct in dev mode, governed queue otherwise.
@@ -132,12 +152,13 @@ def _bucket_label(key: str) -> str:
 def main() -> None:
     st.set_page_config(page_title="ORI Portfolio Dashboard", layout="wide")
     st.title("ORI Portfolio Dashboard")
-    st.caption("ORI_IA v0.1 · local only · no network calls")
+    st.caption("ORI_IA v0.1 · offline by default · network calls only on explicit request")
 
-    # Refresh clears the summary cache and any stale commentary.
+    # Refresh clears the summary cache and all derived session state.
     if st.button("Refresh"):
         load_summary.clear()
         st.session_state.pop("commentary", None)
+        st.session_state.pop("price_data", None)
         st.rerun()
 
     with st.spinner("Loading portfolio summary…"):
@@ -161,6 +182,53 @@ def main() -> None:
     col4.metric("Total Cost Basis",    _fmt_cad(tcb)  if tcb  is not None else "—")
     col5.metric("Unrealized Gain",     _fmt_cad(tug)  if tug  is not None else "—")
     col6.metric("Unrealized Gain (%)", f"{tugp:.2f}%" if tugp is not None else "—")
+
+    # ── Row 1c: Live prices + dividend income ─────────────────────────────
+    price_result = st.session_state.get("price_data")
+    income_summary = price_result.get("income_summary", {}) if price_result and "error" not in price_result else {}
+
+    _p_btn, _p_clr, _p_info = st.columns([1, 1, 5])
+    with _p_btn:
+        if st.button("Refresh Prices", help="Fetches live prices from Yahoo Finance (network call)"):
+            with st.spinner("Fetching live prices and dividend data…"):
+                st.session_state["price_data"] = _fetch_prices()
+            st.rerun()
+    with _p_clr:
+        if price_result and st.button("Clear Prices"):
+            st.session_state.pop("price_data", None)
+            st.rerun()
+    with _p_info:
+        if price_result and "error" not in price_result:
+            fetched_at = price_result.get("fetched_at", "—")
+            fc = price_result.get("fetched_count", 0)
+            sc = price_result.get("stale_count", 0)
+            st.caption(f"Prices as of {fetched_at}  ·  {fc} live, {sc} stale/no-data")
+
+    if price_result and "error" in price_result:
+        st.error(price_result["error"])
+
+    if income_summary:
+        cad_income = income_summary.get("total_annual_income_cad")
+        usd_income = income_summary.get("total_annual_income_usd")
+        cad_yield  = (
+            round(cad_income / summary.get("total_market_value", 1) * 100, 2)
+            if cad_income and summary.get("total_market_value")
+            else None
+        )
+        _ic1, _ic2, _ic3 = st.columns(3)
+        _ic1.metric(
+            "Est. Annual Income (CAD)",
+            _fmt_cad(cad_income) if cad_income is not None else "—",
+        )
+        _ic2.metric(
+            "Portfolio Yield (CAD)",
+            f"{cad_yield:.2f}%" if cad_yield is not None else "—",
+        )
+        _ic3.metric(
+            "Est. Annual Income (USD)",
+            f"${usd_income:,.2f}" if usd_income is not None else "—",
+            help="USD positions reported separately — no FX conversion applied",
+        )
 
     st.divider()
 
@@ -307,15 +375,48 @@ def main() -> None:
         elif acct_filter == "Unclassified only":
             mask &= pos_df["unclassified_value"] > 0
 
+        # Merge live price + dividend data into positions df if available
+        if price_result and "error" not in price_result and price_result.get("price_data"):
+            pd_map = price_result["price_data"]
+            pos_df["Current Price"]  = pos_df["symbol"].map(
+                lambda s: pd_map.get(s.upper(), {}).get("price")
+            )
+            pos_df["Div Yield (%)"]  = pos_df["symbol"].map(
+                lambda s: pd_map.get(s.upper(), {}).get("dividend_yield_pct")
+            )
+            pos_df["Annual Income"]  = pos_df["symbol"].map(
+                lambda s: pd_map.get(s.upper(), {}).get("annual_income")
+            )
+            pos_df["Price Stale"]    = pos_df["symbol"].map(
+                lambda s: pd_map.get(s.upper(), {}).get("stale", False)
+            )
+            # Recalculate market value and P&L from live price + quantity
+            def _recalc_mv(row):
+                price = row.get("Current Price")
+                qty   = row.get("quantity") or 0
+                if price and qty:
+                    return round(float(price) * float(qty), 2)
+                return row.get("market_value")
+
+            pos_df["Live MV"] = pos_df.apply(_recalc_mv, axis=1)
+            pos_df["Live Gain"] = pos_df.apply(
+                lambda row: round(row["Live MV"] - row["cost_basis"], 2)
+                if row.get("cost_basis") and row.get("Live MV") else None,
+                axis=1,
+            )
+        else:
+            for col in ["Current Price", "Div Yield (%)", "Annual Income", "Price Stale", "Live MV", "Live Gain"]:
+                pos_df[col] = None
+
         filtered = (
             pos_df[mask]
-            .drop(columns=["reconciliation_delta"], errors="ignore")
+            .drop(columns=["reconciliation_delta", "quantity", "Price Stale"], errors="ignore")
             .rename(columns={
                 "symbol":               "Symbol",
                 "security_name":        "Security",
                 "sector":               "Sector",
                 "asset_class":          "Asset Class",
-                "market_value":         "Market Value",
+                "market_value":         "CSV Market Value",
                 "weight_pct":           "Weight (%)",
                 "cost_basis":           "Cost Basis",
                 "unrealized_gain":      "Unrealized Gain",
@@ -324,8 +425,10 @@ def main() -> None:
                 "non_registered_value": "Non-Reg",
                 "unclassified_value":   "Unclassified",
                 "account_count":        "Accounts",
+                "Live MV":              "Live Market Value",
+                "Live Gain":            "Live Gain",
             })
-            .sort_values("Market Value", ascending=False)
+            .sort_values("CSV Market Value", ascending=False)
         )
 
         # ── P&L conditional formatting ─────────────────────────────────────
@@ -339,13 +442,20 @@ def main() -> None:
                 for v in col
             ]
 
-        styled = filtered.style.apply(_color_gain_col, subset=["Unrealized Gain"])
+        _gain_col = "Live Gain" if "Live Gain" in filtered.columns and filtered["Live Gain"].notna().any() else "Unrealized Gain"
+        styled = filtered.style.apply(_color_gain_col, subset=[_gain_col])
 
         st.dataframe(
             styled,
             column_config={
-                "Market Value": st.column_config.NumberColumn(
-                    "Market Value ($)", format="%.2f"
+                "CSV Market Value": st.column_config.NumberColumn(
+                    "CSV Market Value ($)", format="%.2f"
+                ),
+                "Live Market Value": st.column_config.NumberColumn(
+                    "Live Market Value ($)", format="%.2f"
+                ),
+                "Current Price": st.column_config.NumberColumn(
+                    "Current Price", format="%.2f"
                 ),
                 "Weight (%)": st.column_config.NumberColumn(
                     "Weight (%)", format="%.2f%%"
@@ -358,6 +468,15 @@ def main() -> None:
                 ),
                 "Unrealized Gain (%)": st.column_config.NumberColumn(
                     "Unrealized Gain (%)", format="%.2f%%"
+                ),
+                "Live Gain": st.column_config.NumberColumn(
+                    "Live Gain ($)", format="%.2f"
+                ),
+                "Div Yield (%)": st.column_config.NumberColumn(
+                    "Div Yield (%)", format="%.2f%%"
+                ),
+                "Annual Income": st.column_config.NumberColumn(
+                    "Annual Income ($)", format="%.2f"
                 ),
                 "Registered": st.column_config.NumberColumn(
                     "Registered ($)", format="$%,.2f"
