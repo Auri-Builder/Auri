@@ -33,6 +33,10 @@ env/
 *.csv
 data/portfolio/accounts.yaml
 
+# ORI Personal — personal investor profile and answers, never commit
+data/portfolio/profile.yaml
+data/portfolio/answers.yaml
+
 # Logs
 *.log
 *.jsonl
