@@ -781,6 +781,75 @@ def handle_portfolio_profile_v0(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# handle_portfolio_prices_v0
+#
+# SECURITY / GOVERNANCE NOTE: NETWORK CALLS
+#
+# This is the only action in ORI Personal that makes outbound network calls.
+# It is explicitly gated — never called automatically.
+# Data fetched: current price, dividend rate, dividend yield per symbol.
+# Source: Yahoo Finance via yfinance (public market data only).
+# No personal financial data is sent outbound.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_prices_v0(params: dict) -> dict:
+    """
+    Fetch current market prices and dividend data for all portfolio positions.
+
+    *** Makes outbound network calls to Yahoo Finance. ***
+    Must only be called on explicit user request (Refresh Prices button).
+
+    Returns:
+        {
+            "price_data":     dict  — per-symbol price + dividend info,
+            "income_summary": dict  — portfolio-level income totals,
+            "fetched_count":  int,
+            "stale_count":    int,
+            "fetched_at":     str   — ISO timestamp,
+        }
+    """
+    _ = params  # reserved for future options (symbol filter, force_refresh, etc.)
+
+    # Load symbol refs for Yahoo Finance symbol resolution
+    symbol_refs: dict = {}
+    if SYMBOL_REF_PATH.exists():
+        try:
+            with SYMBOL_REF_PATH.open("r", encoding="utf-8") as fh:
+                ref_data = yaml.safe_load(fh) or {}
+            symbol_refs = {k.upper(): v for k, v in ref_data.get("symbols", {}).items()}
+        except Exception as exc:
+            return {"error": f"Failed to load symbol refs: {exc}"}
+
+    # Get current positions from the portfolio summary
+    summary = handle_portfolio_summary_v0({})
+    if "error" in summary:
+        return summary
+
+    positions = summary.get("positions_summary", [])
+    if not positions:
+        return {"error": "No positions found in portfolio summary."}
+
+    # Fetch prices — network calls happen here
+    try:
+        from agents.ori_ia.market_data import fetch_prices, compute_income_summary  # noqa: PLC0415
+        price_data = fetch_prices(positions, symbol_refs)
+        income_summary = compute_income_summary(price_data)
+    except Exception as exc:
+        return {"error": f"Price fetch failed: {exc}"}
+
+    fetched_count = sum(1 for d in price_data.values() if not d.get("stale"))
+    stale_count   = sum(1 for d in price_data.values() if d.get("stale"))
+
+    return {
+        "price_data":     price_data,
+        "income_summary": income_summary,
+        "fetched_count":  fetched_count,
+        "stale_count":    stale_count,
+        "fetched_at":     datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # ACTION REGISTRY
 #
 # SECURITY PRINCIPLE:
@@ -800,6 +869,7 @@ ACTION_HANDLERS = {
     "portfolio_compare_v0":        handle_portfolio_compare_v0,
     "portfolio_commentary_v0":     handle_portfolio_commentary_v0,
     "portfolio_profile_v0":        handle_portfolio_profile_v0,
+    "portfolio_prices_v0":         handle_portfolio_prices_v0,
 }
 
 
