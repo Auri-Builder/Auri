@@ -65,6 +65,11 @@ SYMBOL_REF_PATH = (PROJECT_ROOT / "refs" / "symbols.yaml").resolve()
 # Absent → local Ollama default.  Present → overrides provider / model.
 LLM_CONFIG_PATH = (PROJECT_ROOT / "llm_config.yaml").resolve()
 
+# ORI Personal — risk-profiling config paths (both gitignored except questions).
+QUESTIONS_PATH = SAFE_PORTFOLIO_DIR / "questions.yaml"
+PROFILE_PATH   = SAFE_PORTFOLIO_DIR / "profile.yaml"
+ANSWERS_PATH   = SAFE_PORTFOLIO_DIR / "answers.yaml"
+
 # ---------------------------------------------------------------------------
 # handle_list_dir
 #
@@ -706,6 +711,76 @@ def handle_portfolio_commentary_v0(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# handle_portfolio_profile_v0
+#
+# SECURITY PRINCIPLE: Personal data stays local.
+#
+# Reads questions.yaml and answers.yaml (both gitignored) and returns
+# only DERIVED aggregates — risk_score, label, completeness — never the
+# raw answer values.  Optionally writes derived fields back to profile.yaml
+# so the dashboard can display the latest score without re-running.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_profile_v0(params: dict) -> dict:
+    """
+    Compute risk score from questions.yaml + answers.yaml.
+
+    Optional params:
+        write_profile (bool, default True) — if True, writes derived fields
+            (risk_score, risk_label, max_drawdown_tolerance_pct, last_scored)
+            back to profile.yaml so the dashboard can display them without
+            re-running the scorer.
+
+    Returns:
+        {
+            "risk_score":                  float   0–100,
+            "risk_label":                  str,
+            "completeness_pct":            float   0–100,
+            "answered_count":              int,
+            "total_count":                 int,
+            "max_drawdown_tolerance_pct":  float | None,
+            "scored_questions":            list[dict],  # per-question breakdown
+        }
+    """
+    write_profile = params.get("write_profile", True)
+
+    if not QUESTIONS_PATH.exists():
+        return {"error": f"questions.yaml not found at {QUESTIONS_PATH}"}
+    if not ANSWERS_PATH.exists():
+        return {"error": f"answers.yaml not found at {ANSWERS_PATH}"}
+
+    try:
+        from agents.ori_ia.risk_profile import load_and_score  # noqa: PLC0415
+        result = load_and_score(
+            questions_path=QUESTIONS_PATH,
+            answers_path=ANSWERS_PATH,
+        )
+    except Exception as exc:
+        return {"error": f"Risk scoring failed: {exc}"}
+
+    # Optionally write derived fields back into profile.yaml.
+    # This keeps profile.yaml as the single source of truth for the latest score
+    # without requiring the dashboard to re-run the scorer on every page load.
+    if write_profile and PROFILE_PATH.exists():
+        try:
+            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+                profile_data = yaml.safe_load(fh) or {}
+            if "derived" not in profile_data:
+                profile_data["derived"] = {}
+            profile_data["derived"]["risk_score"]                 = result["risk_score"]
+            profile_data["derived"]["risk_label"]                 = result["risk_label"]
+            profile_data["derived"]["max_drawdown_tolerance_pct"] = result["max_drawdown_tolerance_pct"]
+            profile_data["derived"]["last_scored"]                = datetime.now().date().isoformat()
+            with PROFILE_PATH.open("w", encoding="utf-8") as fh:
+                yaml.dump(profile_data, fh, allow_unicode=True, sort_keys=False)
+        except Exception as exc:
+            # Non-fatal — score is still returned, just not persisted.
+            result["profile_write_warning"] = f"Could not update profile.yaml: {exc}"
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # ACTION REGISTRY
 #
 # SECURITY PRINCIPLE:
@@ -724,6 +799,7 @@ ACTION_HANDLERS = {
     "portfolio_snapshot_v0":       handle_portfolio_snapshot_v0,
     "portfolio_compare_v0":        handle_portfolio_compare_v0,
     "portfolio_commentary_v0":     handle_portfolio_commentary_v0,
+    "portfolio_profile_v0":        handle_portfolio_profile_v0,
 }
 
 
