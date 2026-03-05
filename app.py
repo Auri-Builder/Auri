@@ -150,9 +150,9 @@ def _bucket_label(key: str) -> str:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(page_title="ORI Portfolio Dashboard", layout="wide")
-    st.title("ORI Portfolio Dashboard")
-    st.caption("ORI_IA v0.1 · offline by default · network calls only on explicit request")
+    st.set_page_config(page_title="Auri — Portfolio Dashboard", layout="wide")
+    st.title("Auri Portfolio Dashboard")
+    st.caption("Personal investment intelligence · offline by default · network calls only on explicit request")
 
     # Refresh clears the summary cache and all derived session state.
     if st.button("Refresh"):
@@ -408,15 +408,17 @@ def main() -> None:
             for col in ["Current Price", "Div Yield (%)", "Annual Income", "Price Stale", "Live MV", "Live Gain"]:
                 pos_df[col] = None
 
-        filtered = (
+        # Rename all columns once; each tab selects its subset
+        base = (
             pos_df[mask]
-            .drop(columns=["reconciliation_delta", "quantity", "Price Stale"], errors="ignore")
+            .drop(columns=["reconciliation_delta", "Price Stale"], errors="ignore")
             .rename(columns={
                 "symbol":               "Symbol",
                 "security_name":        "Security",
                 "sector":               "Sector",
                 "asset_class":          "Asset Class",
                 "market_value":         "CSV Market Value",
+                "quantity":             "Quantity",
                 "weight_pct":           "Weight (%)",
                 "cost_basis":           "Cost Basis",
                 "unrealized_gain":      "Unrealized Gain",
@@ -429,12 +431,14 @@ def main() -> None:
                 "Live Gain":            "Live Gain",
             })
             .sort_values("CSV Market Value", ascending=False)
+            .reset_index(drop=True)
         )
 
-        # ── P&L conditional formatting ─────────────────────────────────────
-        # Soft green for gains, soft red for losses, blank for None / zero.
-        # Applied to the "Unrealized Gain" column only — keeps the table clean.
-        def _color_gain_col(col):
+        n_shown  = len(base)
+        n_total  = len(pos_df)
+        st.caption(f"Showing {n_shown} of {n_total} positions")
+
+        def _color_gain(col):
             return [
                 "background-color: #e8f5e9" if not pd.isna(v) and v > 0
                 else "background-color: #fdecea" if not pd.isna(v) and v < 0
@@ -442,56 +446,68 @@ def main() -> None:
                 for v in col
             ]
 
-        _gain_col = "Live Gain" if "Live Gain" in filtered.columns and filtered["Live Gain"].notna().any() else "Unrealized Gain"
-        styled = filtered.style.apply(_color_gain_col, subset=[_gain_col])
-
-        st.dataframe(
-            styled,
-            column_config={
-                "CSV Market Value": st.column_config.NumberColumn(
-                    "CSV Market Value ($)", format="%.2f"
-                ),
-                "Live Market Value": st.column_config.NumberColumn(
-                    "Live Market Value ($)", format="%.2f"
-                ),
-                "Current Price": st.column_config.NumberColumn(
-                    "Current Price", format="%.2f"
-                ),
-                "Weight (%)": st.column_config.NumberColumn(
-                    "Weight (%)", format="%.2f%%"
-                ),
-                "Cost Basis": st.column_config.NumberColumn(
-                    "Cost Basis ($)", format="%.2f"
-                ),
-                "Unrealized Gain": st.column_config.NumberColumn(
-                    "Unrealized Gain ($)", format="%.2f"
-                ),
-                "Unrealized Gain (%)": st.column_config.NumberColumn(
-                    "Unrealized Gain (%)", format="%.2f%%"
-                ),
-                "Live Gain": st.column_config.NumberColumn(
-                    "Live Gain ($)", format="%.2f"
-                ),
-                "Div Yield (%)": st.column_config.NumberColumn(
-                    "Div Yield (%)", format="%.2f%%"
-                ),
-                "Annual Income": st.column_config.NumberColumn(
-                    "Annual Income ($)", format="%.2f"
-                ),
-                "Registered": st.column_config.NumberColumn(
-                    "Registered ($)", format="$%,.2f"
-                ),
-                "Non-Reg": st.column_config.NumberColumn(
-                    "Non-Reg ($)", format="$%,.2f"
-                ),
-                "Unclassified": st.column_config.NumberColumn(
-                    "Unclassified ($)", format="$%,.2f"
-                ),
-            },
-            width="stretch",
-            hide_index=True,
+        tab_holdings, tab_income, tab_pnl, tab_accounts = st.tabs(
+            ["Holdings", "Income", "P&L", "Accounts"]
         )
-        st.caption(f"Showing {len(filtered)} of {len(pos_df)} positions")
+
+        # ── Holdings tab ──────────────────────────────────────────────────
+        with tab_holdings:
+            mv_col = "Live Market Value" if base["Live Market Value"].notna().any() else "CSV Market Value"
+            cols = ["Symbol", "Security", "Sector", "Asset Class", "Weight (%)", "CSV Market Value", "Live Market Value"]
+            st.dataframe(
+                base[cols].sort_values("CSV Market Value", ascending=False),
+                column_config={
+                    "CSV Market Value":  st.column_config.NumberColumn("CSV Market Value ($)",  format="$%,.2f"),
+                    "Live Market Value": st.column_config.NumberColumn("Live Market Value ($)", format="$%,.2f"),
+                    "Weight (%)":        st.column_config.NumberColumn("Weight (%)",            format="%.2f%%"),
+                },
+                width="stretch", hide_index=True,
+            )
+
+        # ── Income tab ────────────────────────────────────────────────────
+        with tab_income:
+            inc_cols = ["Symbol", "Security", "Sector", "Current Price", "Div Yield (%)", "Annual Income", "Live Market Value"]
+            inc_df = base[inc_cols].sort_values("Annual Income", ascending=False, na_position="last")
+            st.dataframe(
+                inc_df,
+                column_config={
+                    "Current Price":     st.column_config.NumberColumn("Current Price ($)",    format="$%.2f"),
+                    "Div Yield (%)":     st.column_config.NumberColumn("Div Yield (%)",        format="%.2f%%"),
+                    "Annual Income":     st.column_config.NumberColumn("Annual Income ($)",    format="$%,.2f"),
+                    "Live Market Value": st.column_config.NumberColumn("Live Market Value ($)", format="$%,.2f"),
+                },
+                width="stretch", hide_index=True,
+            )
+
+        # ── P&L tab ───────────────────────────────────────────────────────
+        with tab_pnl:
+            pnl_cols = ["Symbol", "Security", "Cost Basis", "Unrealized Gain", "Unrealized Gain (%)", "Live Gain"]
+            pnl_df = base[pnl_cols].sort_values("Unrealized Gain", ascending=True, na_position="last")
+            _gain_col = "Live Gain" if pnl_df["Live Gain"].notna().any() else "Unrealized Gain"
+            styled_pnl = pnl_df.style.apply(_color_gain, subset=[_gain_col])
+            st.dataframe(
+                styled_pnl,
+                column_config={
+                    "Cost Basis":           st.column_config.NumberColumn("Cost Basis ($)",         format="$%,.2f"),
+                    "Unrealized Gain":      st.column_config.NumberColumn("Unrealized Gain ($)",    format="$%,.2f"),
+                    "Unrealized Gain (%)":  st.column_config.NumberColumn("Unrealized Gain (%)",    format="%.2f%%"),
+                    "Live Gain":            st.column_config.NumberColumn("Live Gain ($)",          format="$%,.2f"),
+                },
+                width="stretch", hide_index=True,
+            )
+
+        # ── Accounts tab ──────────────────────────────────────────────────
+        with tab_accounts:
+            acct_cols = ["Symbol", "Security", "Asset Class", "Registered", "Non-Reg", "Unclassified", "Accounts"]
+            st.dataframe(
+                base[acct_cols].sort_values("Registered", ascending=False, na_position="last"),
+                column_config={
+                    "Registered":   st.column_config.NumberColumn("Registered ($)",   format="$%,.2f"),
+                    "Non-Reg":      st.column_config.NumberColumn("Non-Reg ($)",      format="$%,.2f"),
+                    "Unclassified": st.column_config.NumberColumn("Unclassified ($)", format="$%,.2f"),
+                },
+                width="stretch", hide_index=True,
+            )
 
     # ── Row 6: Portfolio Commentary ───────────────────────────────────────
     st.divider()

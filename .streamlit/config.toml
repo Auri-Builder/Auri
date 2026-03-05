@@ -1,0 +1,13 @@
+[theme]
+# Auri — TD WebBroker-inspired palette
+primaryColor           = "#00A650"   # TD green  — buttons, active elements, selections
+backgroundColor        = "#FFFFFF"   # White page background
+secondaryBackgroundColor = "#F2F5F9" # Light blue-grey — sidebar, forms, expanders
+textColor              = "#1A1A1A"   # Near-black body text
+font                   = "sans serif"
+
+[server]
+# Bind to all interfaces so the dashboard is reachable from oricore.
+# Restrict access via firewall (ufw allow from 192.168.2.0/24 to any port 8501).
+address = "0.0.0.0"
+headless = true

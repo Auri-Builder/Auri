@@ -77,7 +77,7 @@ def _list_snapshots() -> list[str]:
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Snapshots — ORI", layout="wide")
+st.set_page_config(page_title="Auri · Snapshots", layout="wide")
 st.title("Snapshots")
 st.caption(
     "Point-in-time portfolio snapshots · aggregates only · "

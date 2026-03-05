@@ -22,6 +22,11 @@
 #   - Set to null to disable market data fetching (structured notes, money market).
 #   Unit trust convention: "AP.UN" → "AP-UN.TO" (Yahoo uses "-" not ".")
 #   TSX Venture: append ".V" instead of ".TO"
+#
+# globe_symbol (optional):
+#   Globe and Mail / Barchart fund symbol (appends ".CF" convention for Canadian funds).
+#   Used for mutual funds and structured notes where yahoo_symbol is null.
+#   Format: FUNDCODE.CF  e.g. NPP5502.CF
 
 symbols:
 
@@ -63,8 +68,8 @@ symbols:
   # ---------------------------------------------------------------------------
   # Fixed Income / Funds — no market data available
   # ---------------------------------------------------------------------------
-  NPP5502: {sector: "Fixed Income",  asset_class: "Structured Note", yahoo_symbol: null}  # TD structured product
-  TDB8151: {sector: "Money Market",  asset_class: "Mutual Fund",     yahoo_symbol: null}  # TD money market fund
+  NPP5502: {sector: "Fixed Income",  asset_class: "Mutual Fund",  yahoo_symbol: null, globe_symbol: "NPP5502.CF", distribution_rate_pct: 14.0}  # Ninepoint Energy Income Fund — 14% annual dist rate (NAV-based, effective Jan 2026)
+  TDB8151: {sector: "Money Market",  asset_class: "Mutual Fund",  yahoo_symbol: null, globe_symbol: "TDB8151.CF"}  # TD money market fund
 
   # ---------------------------------------------------------------------------
   # TSX Venture

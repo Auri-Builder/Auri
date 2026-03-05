@@ -696,10 +696,20 @@ def handle_portfolio_commentary_v0(params: dict) -> dict:
     if "error" in summary:
         return summary
 
+    # Load investor philosophy from profile.yaml (optional — graceful if absent)
+    philosophy: str | None = None
+    if PROFILE_PATH.exists():
+        try:
+            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+                _prof = yaml.safe_load(fh) or {}
+            philosophy = _prof.get("philosophy") or None
+        except Exception:
+            pass  # non-fatal — commentary works without it
+
     # Generate commentary — whitelist enforced inside commentary.py
     try:
         from agents.ori_ia.commentary import generate_commentary  # noqa: PLC0415
-        result = generate_commentary(summary, adapter)
+        result = generate_commentary(summary, adapter, philosophy=philosophy)
     except Exception as exc:
         return {"error": f"Commentary generation failed: {exc}"}
 

@@ -115,19 +115,111 @@ def _fetch_one(
         result["currency"] = info.get("currency", "CAD")
 
         # Dividend data
-        div_rate = info.get("dividendRate") or 0.0
-        div_yield = info.get("dividendYield") or 0.0   # decimal, e.g. 0.045
-        result["dividend_rate"]      = float(div_rate)
-        result["dividend_yield_pct"] = round(float(div_yield) * 100, 4)
+        # yfinance 1.x returns dividendYield already as a percentage (e.g. 3.21 = 3.21%)
+        # For ETFs/funds, dividendRate is often None — fall back to yield * price * qty.
+        # The "yield" field (when present) is in decimal form (e.g. 0.0636).
+        div_rate  = info.get("dividendRate")   # None for many ETFs
+        div_yield = info.get("dividendYield") or 0.0
+        yld       = info.get("yield") or 0.0   # decimal, e.g. 0.0636
+
+        result["dividend_rate"]      = float(div_rate) if div_rate else None
+        result["dividend_yield_pct"] = round(float(div_yield), 4)
 
         if div_rate and quantity:
             result["annual_income"] = round(float(div_rate) * float(quantity), 2)
+        elif yld and price and quantity:
+            # ETF/fund: estimate annual income from yield × market value
+            result["annual_income"] = round(float(yld) * float(price) * float(quantity), 2)
 
     except Exception as exc:
         logger.warning("market_data: failed to fetch %s (%s): %s", broker_symbol, yahoo_symbol, exc)
         result["stale"]        = True
         result["stale_reason"] = str(exc)
         result["price"]        = last_price
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Globe and Mail / Barchart fund NAV fetch (Canadian mutual funds)
+# ---------------------------------------------------------------------------
+
+_BARCHART_EOD_URL = (
+    "https://globeandmail.pl.barchart.com/proxies/timeseries/queryeod.ashx"
+)
+_BARCHART_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+}
+
+
+def _fetch_globe(
+    broker_symbol: str,
+    globe_symbol: str,
+    quantity: float,
+    last_price: float | None,
+    distribution_rate_pct: float | None = None,
+) -> dict:
+    """
+    Fetch latest NAV for a Canadian mutual fund from the Globe and Mail /
+    Barchart endpoint.
+
+    Returns the same shape as _fetch_one so callers handle both uniformly.
+    Response format: SYMBOL,DATE,OPEN,HIGH,LOW,CLOSE,VOLUME  — NAV = CLOSE.
+
+    distribution_rate_pct: annual distribution as % of NAV (from refs/symbols.yaml).
+        If provided, annual_income = nav * rate/100 * quantity.
+        This is a NAV-based rate (e.g. 14.0 for Ninepoint Energy Income Fund Series F).
+    """
+    result: dict = {
+        "yahoo_symbol":       None,
+        "globe_symbol":       globe_symbol,
+        "price":              last_price,
+        "currency":           "CAD",
+        "dividend_rate":      None,
+        "dividend_yield_pct": None,
+        "annual_income":      None,
+        "stale":              True,
+        "stale_reason":       None,
+        "last_price":         last_price,
+    }
+
+    try:
+        import requests  # lazy import — network dep  # noqa: PLC0415
+        resp = requests.get(
+            _BARCHART_EOD_URL,
+            params={
+                "symbol":      globe_symbol,
+                "data":        "daily",
+                "maxrecords":  1,
+                "volume":      "total",
+                "order":       "asc",
+                "dividends":   "false",
+                "backadjust":  "false",
+            },
+            headers=_BARCHART_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        line = resp.text.strip()
+        if not line:
+            raise ValueError(f"Empty response for {globe_symbol!r}")
+        parts = line.split(",")
+        if len(parts) < 6:
+            raise ValueError(f"Unexpected response format: {line!r}")
+        nav = float(parts[5])  # CLOSE = NAV
+        result["price"] = nav
+        result["stale"] = False
+        result["stale_reason"] = None
+
+        # Compute income from NAV-based distribution rate if provided
+        if distribution_rate_pct and quantity:
+            rate = float(distribution_rate_pct)
+            result["dividend_yield_pct"] = rate
+            result["annual_income"] = round(nav * rate / 100 * quantity, 2)
+
+    except Exception as exc:
+        logger.warning("market_data: Globe fetch failed %s (%s): %s", broker_symbol, globe_symbol, exc)
+        result["stale_reason"] = str(exc)
 
     return result
 
@@ -180,18 +272,23 @@ def fetch_prices(
         yahoo_sym = resolve_yahoo_symbol(symbol, ref_entry)
 
         if yahoo_sym is None:
-            # No market data for this symbol (structured note, money market, etc.)
-            results[symbol] = {
-                "yahoo_symbol":       None,
-                "price":              last_price,
-                "currency":           "CAD",
-                "dividend_rate":      None,
-                "dividend_yield_pct": None,
-                "annual_income":      None,
-                "stale":              True,
-                "stale_reason":       "No market data — see yahoo_symbol: null in refs/symbols.yaml",
-                "last_price":         last_price,
-            }
+            # Check for Globe and Mail / Barchart fund symbol (mutual funds)
+            globe_sym = ref_entry.get("globe_symbol") if ref_entry else None
+            if globe_sym:
+                dist_rate = ref_entry.get("distribution_rate_pct") if ref_entry else None
+                results[symbol] = _fetch_globe(symbol, globe_sym, quantity, last_price, distribution_rate_pct=dist_rate)
+            else:
+                results[symbol] = {
+                    "yahoo_symbol":       None,
+                    "price":              last_price,
+                    "currency":           "CAD",
+                    "dividend_rate":      None,
+                    "dividend_yield_pct": None,
+                    "annual_income":      None,
+                    "stale":              True,
+                    "stale_reason":       "No market data — see yahoo_symbol: null in refs/symbols.yaml",
+                    "last_price":         last_price,
+                }
             continue
 
         results[symbol] = _fetch_one(symbol, yahoo_sym, quantity, last_price)

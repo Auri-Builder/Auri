@@ -34,7 +34,7 @@ from agents.ori_ia.normalize import normalize_csv
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Health Checks — ORI", layout="wide")
+st.set_page_config(page_title="Auri · Health Checks", layout="wide")
 st.title("Health Checks")
 st.caption("Validates accounts.yaml + CSV files · read-only · no writes · no network calls")
 

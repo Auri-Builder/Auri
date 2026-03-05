@@ -68,20 +68,31 @@ def _fmt(value, spec: str = ",.2f") -> str:
     return format(value, spec)
 
 
-def build_prompt(summary: dict) -> str:
+def build_prompt(summary: dict, philosophy: str | None = None) -> str:
     """
     Construct the LLM prompt from whitelisted summary fields only.
 
     Args:
-        summary: Output of build_summary() / handle_portfolio_summary_v0().
-                 Only whitelisted keys are read — all others are ignored.
+        summary:    Output of build_summary() / handle_portfolio_summary_v0().
+                    Only whitelisted keys are read — all others are ignored.
+        philosophy: Optional free-text investment philosophy from profile.yaml.
+                    Included verbatim so the LLM can contextualise its analysis.
 
     Returns:
         A structured plain-text + Markdown prompt.
     """
-    lines: list[str] = [
-        _SYSTEM_INSTRUCTION,
-        "",
+    lines: list[str] = [_SYSTEM_INSTRUCTION, ""]
+
+    if philosophy:
+        lines += [
+            "---",
+            "## Investor's Investment Philosophy",
+            "",
+            philosophy.strip(),
+            "",
+        ]
+
+    lines += [
         "---",
         "## Portfolio Data",
         "",
@@ -165,13 +176,14 @@ def build_prompt(summary: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_commentary(summary: dict, adapter: "LLMAdapter") -> dict:
+def generate_commentary(summary: dict, adapter: "LLMAdapter", philosophy: str | None = None) -> dict:
     """
     Generate portfolio commentary using the provided LLM adapter.
 
     Args:
-        summary: Output of build_summary() / handle_portfolio_summary_v0().
-        adapter: An LLMAdapter instance (local or cloud).
+        summary:    Output of build_summary() / handle_portfolio_summary_v0().
+        adapter:    An LLMAdapter instance (local or cloud).
+        philosophy: Optional free-text investment philosophy from profile.yaml.
 
     Returns:
         {
@@ -182,7 +194,7 @@ def generate_commentary(summary: dict, adapter: "LLMAdapter") -> dict:
     Raises:
         Exception: propagated from the adapter if the LLM call fails.
     """
-    prompt = build_prompt(summary)
+    prompt = build_prompt(summary, philosophy=philosophy)
     logger.info(
         "Sending commentary prompt (%d chars) to %s",
         len(prompt),

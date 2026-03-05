@@ -20,9 +20,12 @@ local:
   model: llama3.2
 
 cloud:
-  provider: anthropic    # or: openai
+  provider: anthropic    # or: openai, xai
   model: claude-haiku-4-5-20251001
-  # API key is read from ANTHROPIC_API_KEY (or OPENAI_API_KEY) env var.
+  # API key env vars:
+  #   anthropic → ANTHROPIC_API_KEY
+  #   openai    → OPENAI_API_KEY
+  #   xai       → XAI_API_KEY
   # Never store API keys in config files.
 """
 
@@ -137,19 +140,34 @@ class CloudAnthropicAdapter(LLMAdapter):
 
 class CloudOpenAIAdapter(LLMAdapter):
     """
-    Calls the OpenAI API.
+    Calls any OpenAI-compatible API (OpenAI, xAI/Grok, etc.).
     Requires:  pip install openai
-    Requires:  OPENAI_API_KEY environment variable set.
+    Requires:  the appropriate API key environment variable set.
+
+    Args:
+        model:       Model name (e.g. "gpt-4o-mini", "grok-3-mini").
+        base_url:    Override the API base URL (e.g. "https://api.x.ai/v1").
+                     None uses the OpenAI SDK default (api.openai.com).
+        api_key_env: Name of the environment variable holding the API key.
+                     Defaults to "OPENAI_API_KEY".
+        label:       Provider label prefix for logging (e.g. "openai", "xai").
     """
 
-    def __init__(self, model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        base_url: Optional[str] = None,
+        api_key_env: str = "OPENAI_API_KEY",
+        label: str = "openai",
+    ) -> None:
         self.model = model
-        self.provider_label = f"cloud/openai/{model}"
-        api_key = os.environ.get("OPENAI_API_KEY")
+        self.base_url = base_url
+        self.provider_label = f"cloud/{label}/{model}"
+        api_key = os.environ.get(api_key_env)
         if not api_key:
             raise ValueError(
-                "OPENAI_API_KEY environment variable is not set.\n"
-                "Export it before starting the app:  export OPENAI_API_KEY=sk-..."
+                f"{api_key_env} environment variable is not set.\n"
+                f"Export it before starting the app:  export {api_key_env}=..."
             )
         self._api_key = api_key
 
@@ -161,7 +179,10 @@ class CloudOpenAIAdapter(LLMAdapter):
                 "OpenAI SDK not installed.  Run:  pip install openai"
             ) from exc
 
-        client = openai.OpenAI(api_key=self._api_key)
+        kwargs = {"api_key": self._api_key}
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        client = openai.OpenAI(**kwargs)
         response = client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -206,6 +227,13 @@ def get_adapter(config: Optional[dict] = None) -> LLMAdapter:
         if cloud_provider == "openai":
             return CloudOpenAIAdapter(
                 model=cloud_cfg.get("model", "gpt-4o-mini"),
+            )
+        if cloud_provider == "xai":
+            return CloudOpenAIAdapter(
+                model=cloud_cfg.get("model", "grok-3-mini"),
+                base_url="https://api.x.ai/v1",
+                api_key_env="XAI_API_KEY",
+                label="xai",
             )
         raise ValueError(f"Unknown cloud provider: {cloud_provider!r}")
 

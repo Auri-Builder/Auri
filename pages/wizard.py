@@ -87,7 +87,7 @@ def _find_existing_by_account_id(account_id: str, accounts: dict) -> tuple[str, 
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Upload Wizard — ORI", layout="wide")
+st.set_page_config(page_title="Auri · Upload Wizard", layout="wide")
 st.title("Upload Wizard")
 st.caption("Add CSV portfolio exports · configure account metadata · local only · no network calls")
 
