@@ -29,7 +29,7 @@ from agents.ori_ia.extract import extract_holdings_table   # shared preamble str
 from agents.ori_ia.normalize import normalize_csv
 from agents.ori_ia.schema import REGISTERED_ACCOUNT_TYPES
 
-ACCOUNT_TYPE_OPTIONS = sorted(REGISTERED_ACCOUNT_TYPES) + ["CASH", "Other"]
+ACCOUNT_TYPE_OPTIONS = sorted(REGISTERED_ACCOUNT_TYPES | {"RESP"}) + ["CASH", "Other"]
 CURRENCY_OPTIONS = ["CAD", "USD"]
 
 
@@ -68,6 +68,19 @@ def _safe_filename(name: str) -> str | None:
     if not re.match(r"^[\w\-. ]+\.csv$", safe, re.IGNORECASE):
         return None
     return safe
+
+
+def _find_existing_by_account_id(account_id: str, accounts: dict) -> tuple[str, dict] | tuple[None, None]:
+    """
+    Return (filename, metadata) for an existing accounts.yaml entry whose
+    account_id matches, or (None, None) if not found.
+    """
+    if not account_id:
+        return None, None
+    for fname, meta in accounts.items():
+        if meta.get("account_id", "").upper() == account_id.upper():
+            return fname, meta
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -178,62 +191,106 @@ for uf in uploaded_files:
         st.info("Saved to accounts.yaml this session.")
         continue
 
-    # Already in accounts.yaml
     existing_accounts = _load_accounts()
+
+    # Already in accounts.yaml under this exact filename
     if safe_name in existing_accounts:
         st.info("Already in accounts.yaml — no changes needed.")
         continue
 
-    # Metadata form
-    with st.form(key=f"form_{safe_name}"):
-        col1, col2 = st.columns(2)
-        with col1:
-            account_type = st.selectbox(
-                "Account type",
-                options=ACCOUNT_TYPE_OPTIONS,
-                index=0,
-            )
-            institution = st.text_input("Institution", value="TD Wealth")
-        with col2:
-            account_id = st.text_input(
-                "Account ID",
-                value=_extract_account_id(safe_name),
-                help="Auto-detected from filename where possible.",
-            )
-            label = st.text_input("Label", placeholder="e.g. Jeff TFSA (optional)")
-        currency = st.selectbox("Currency", options=CURRENCY_OPTIONS, index=0)
+    # ── Detect if this is an UPDATE to an existing account ─────────────────
+    detected_id  = _extract_account_id(safe_name)
+    old_filename, old_meta = _find_existing_by_account_id(detected_id, existing_accounts)
 
-        submitted = st.form_submit_button("Save to accounts.yaml")
+    if old_filename and old_meta:
+        # UPDATE PATH — same account_id, new filename (new export date)
+        old_label = old_meta.get("label") or old_meta.get("account_id", old_filename)
+        st.info(
+            f"Detected as an update to **{old_label}**  \n"
+            f"Current file: `{old_filename}`  →  New file: `{safe_name}`"
+        )
 
-    if submitted:
-        tmp_path = v.get("tmp_path")
-        if not tmp_path or not Path(tmp_path).exists():
-            st.error("Temp file missing — please re-upload the file.")
-        else:
-            # Write cleaned CSV to data/portfolio/ only on explicit save
-            PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.copy(tmp_path, PORTFOLIO_DIR / safe_name)
+        delete_old = st.checkbox(
+            f"Also delete old file `{old_filename}` from data/portfolio/",
+            value=True,
+            key=f"del_{safe_name}",
+        )
 
-            # Merge into accounts.yaml
-            current = _load_accounts()
-            if safe_name not in current:
-                entry: dict = {"account_type": account_type, "institution": institution}
-                if account_id:
-                    entry["account_id"] = account_id
-                if label:
-                    entry["label"] = label
-                entry["currency"] = currency
+        if st.button(f"Replace — update accounts.yaml to use {safe_name}", key=f"update_{safe_name}"):
+            tmp_path = v.get("tmp_path")
+            if not tmp_path or not Path(tmp_path).exists():
+                st.error("Temp file missing — please re-upload the file.")
+            else:
+                PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy(tmp_path, PORTFOLIO_DIR / safe_name)
+
+                # Replace the old key with the new filename, preserving metadata
+                current = _load_accounts()
+                entry = dict(current.pop(old_filename, old_meta))
                 current[safe_name] = entry
                 _save_accounts(current)
 
-            st.session_state.saved.add(uf.name)
-            total_now = len(_load_accounts())
-            st.success(
-                f"Saved: {safe_name}. "
-                f"{total_now} account(s) now configured in accounts.yaml."
-            )
-            st.page_link("app.py", label="Go to Dashboard and click Refresh")
-            st.rerun()
+                if delete_old:
+                    old_path = PORTFOLIO_DIR / old_filename
+                    old_path.unlink(missing_ok=True)
+
+                st.session_state.saved.add(uf.name)
+                st.success(
+                    f"Updated: `{old_filename}` → `{safe_name}` in accounts.yaml."
+                    + (f" Old file deleted." if delete_old else "")
+                )
+                st.page_link("app.py", label="Go to Dashboard and click Refresh")
+                st.rerun()
+
+    else:
+        # NEW ACCOUNT PATH
+        with st.form(key=f"form_{safe_name}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                account_type = st.selectbox(
+                    "Account type",
+                    options=ACCOUNT_TYPE_OPTIONS,
+                    index=0,
+                )
+                institution = st.text_input("Institution", value="TD Wealth")
+            with col2:
+                account_id_input = st.text_input(
+                    "Account ID",
+                    value=detected_id,
+                    help="Auto-detected from filename where possible.",
+                )
+                label = st.text_input("Label", placeholder="e.g. Child Name RESP (optional)")
+            currency = st.selectbox("Currency", options=CURRENCY_OPTIONS, index=0)
+
+            submitted = st.form_submit_button("Save to accounts.yaml")
+
+        if submitted:
+            tmp_path = v.get("tmp_path")
+            if not tmp_path or not Path(tmp_path).exists():
+                st.error("Temp file missing — please re-upload the file.")
+            else:
+                PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy(tmp_path, PORTFOLIO_DIR / safe_name)
+
+                current = _load_accounts()
+                if safe_name not in current:
+                    entry = {"account_type": account_type, "institution": institution}
+                    if account_id_input:
+                        entry["account_id"] = account_id_input
+                    if label:
+                        entry["label"] = label
+                    entry["currency"] = currency
+                    current[safe_name] = entry
+                    _save_accounts(current)
+
+                st.session_state.saved.add(uf.name)
+                total_now = len(_load_accounts())
+                st.success(
+                    f"Saved: {safe_name}. "
+                    f"{total_now} account(s) now configured in accounts.yaml."
+                )
+                st.page_link("app.py", label="Go to Dashboard and click Refresh")
+                st.rerun()
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 
