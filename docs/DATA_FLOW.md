@@ -1,4 +1,4 @@
-# ORI Data Flow Specification
+# Auri Data Flow Specification
 Version: 1.0
 Status: Foundational
 

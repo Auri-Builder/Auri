@@ -16,7 +16,7 @@ from pathlib import Path
 # when the runner is invoked as:  python -m core.job_runner
 # ---------------------------------------------------------------------------
 from agents.ori_ia.normalize import normalize_csv
-from agents.ori_ia.analytics import build_summary
+from agents.ori_ia.analytics import build_summary, compute_allocation_deviation, suggest_target_allocation
 from agents.ori_ia.enrich import load_symbol_ref, enrich_rows
 
 
@@ -29,7 +29,7 @@ LOGS.mkdir(exist_ok=True)
 
 JOBS_LOG = LOGS / "jobs.jsonl"
 
-PROJECT_ROOT = Path("/home/cplus/oricn").resolve()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # SAFE_PORTFOLIO_DIR
@@ -414,6 +414,21 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
         top_n=raw_top_n,
     )
     summary["accounts_loaded"] = accounts_loaded
+
+    # --- 7. Policy compliance check (optional — requires profile.yaml) ---
+    # Loads the investor's stated constraints and flags breaches / warnings.
+    # Non-fatal: if profile.yaml is absent, policy_flags is an empty list.
+    try:
+        from agents.ori_ia.analytics import check_policy  # noqa: PLC0415
+        _constraints: dict = {}
+        if PROFILE_PATH.exists():
+            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+                _prof = yaml.safe_load(fh) or {}
+            _constraints = _prof.get("constraints") or {}
+        summary["policy_flags"] = check_policy(summary, _constraints)
+    except Exception:
+        summary["policy_flags"] = []
+
     return summary
 
 
@@ -581,20 +596,21 @@ def handle_portfolio_compare_v0(params: dict) -> dict:
     except (json.JSONDecodeError, OSError) as exc:
         return {"error": f"Failed to read snapshot: {exc}"}
 
-    # delta total market value
+    # market value change
     mv_a = snap_a.get("total_market_value") or 0
     mv_b = snap_b.get("total_market_value") or 0
-    delta_mv = round(mv_b - mv_a, 2)
+    delta_mv     = round(mv_b - mv_a, 2)
+    delta_mv_pct = round((mv_b - mv_a) / mv_a * 100, 2) if mv_a else None
 
     # top position changes — union of symbols from both snapshots
     pos_a = {p["symbol"]: p["weight_pct"] for p in snap_a.get("top_positions", [])}
     pos_b = {p["symbol"]: p["weight_pct"] for p in snap_b.get("top_positions", [])}
     top_changes = [
         {
-            "symbol":      sym,
+            "symbol":       sym,
             "weight_pct_a": pos_a.get(sym),
             "weight_pct_b": pos_b.get(sym),
-            "delta_pct":   round((pos_b.get(sym) or 0) - (pos_a.get(sym) or 0), 2),
+            "delta_pct":    round((pos_b.get(sym) or 0) - (pos_a.get(sym) or 0), 2),
         }
         for sym in sorted(set(pos_a) | set(pos_b))
     ]
@@ -604,10 +620,10 @@ def handle_portfolio_compare_v0(params: dict) -> dict:
     sec_b = snap_b.get("sector_weights_pct", {})
     sector_drift = [
         {
-            "sector":      sec,
+            "sector":       sec,
             "weight_pct_a": sec_a.get(sec),
             "weight_pct_b": sec_b.get(sec),
-            "delta_pct":   round((sec_b.get(sec) or 0) - (sec_a.get(sec) or 0), 2),
+            "delta_pct":    round((sec_b.get(sec) or 0) - (sec_a.get(sec) or 0), 2),
         }
         for sec in sorted(set(sec_a) | set(sec_b))
     ]
@@ -616,12 +632,31 @@ def handle_portfolio_compare_v0(params: dict) -> dict:
     flags_a = {f["symbol"] for f in snap_a.get("concentration_flags", [])}
     flags_b = {f["symbol"] for f in snap_b.get("concentration_flags", [])}
 
+    # positions added / removed (uses full positions_summary if available)
+    syms_a = {p["symbol"] for p in snap_a.get("positions_summary", [])}
+    syms_b = {p["symbol"] for p in snap_b.get("positions_summary", [])}
+    positions_added   = sorted(syms_b - syms_a)
+    positions_removed = sorted(syms_a - syms_b)
+
+    # unrealized gain change
+    ug_a = snap_a.get("total_unrealized_gain")
+    ug_b = snap_b.get("total_unrealized_gain")
+    delta_unrealized_gain = (
+        round(ug_b - ug_a, 2) if ug_a is not None and ug_b is not None else None
+    )
+
     return {
         "snapshot_a":               path_a.name,
         "snapshot_b":               path_b.name,
+        "total_market_value_a":     mv_a,
+        "total_market_value_b":     mv_b,
         "delta_total_market_value": delta_mv,
+        "delta_total_market_value_pct": delta_mv_pct,
+        "delta_unrealized_gain":    delta_unrealized_gain,
         "top_position_changes":     top_changes,
         "sector_drift":             sector_drift,
+        "positions_added":          positions_added,
+        "positions_removed":        positions_removed,
         "concentration_changes": {
             "newly_flagged": sorted(flags_b - flags_a),
             "dropped_below": sorted(flags_a - flags_b),
@@ -677,39 +712,69 @@ def handle_portfolio_commentary_v0(params: dict) -> dict:
             "prompt_length": int  — character count (diagnostic),
         }
     """
-    _ = params  # reserved for future options (model_override, style, etc.)
+    mode = params.get("mode", "standard")
+    if mode not in ("standard", "challenge"):
+        return {"error": f"Unknown commentary mode: {mode!r}. Use 'standard' or 'challenge'."}
 
-    # Load LLM config (absent → local default)
-    llm_cfg = _load_llm_config()
-    if "error" in llm_cfg:
-        return llm_cfg
-
-    # Build adapter
+    # Build adapter — prefer ~/.auri/config.json (wizard-configured) over
+    # llm_config.yaml env-var approach so the UI wizard key always works.
+    adapter = None
     try:
-        from agents.ori_ia.llm_adapter import get_adapter  # noqa: PLC0415
-        adapter = get_adapter(llm_cfg)
-    except Exception as exc:
-        return {"error": f"LLM adapter init failed: {exc}"}
+        from agents.ai_provider import get_provider, AIProviderError  # noqa: PLC0415
+        from agents.ori_ia.llm_adapter import LLMAdapter              # noqa: PLC0415
+
+        class _ProviderAdapter(LLMAdapter):
+            """Thin shim: wraps ai_provider.AIProvider into LLMAdapter interface."""
+            def __init__(self, p):
+                self._p = p
+                self.provider_label = p.provider_name
+
+            def generate(self, prompt: str) -> str:
+                return self._p.chat(system="You are a financial planning assistant.", user=prompt)
+
+        _prov = get_provider()
+        adapter = _ProviderAdapter(_prov)
+    except Exception:
+        pass  # fall through to llm_config.yaml
+
+    if adapter is None:
+        # Fall back to legacy llm_config.yaml / Ollama path
+        llm_cfg = _load_llm_config()
+        if "error" in llm_cfg:
+            return llm_cfg
+        try:
+            from agents.ori_ia.llm_adapter import get_adapter  # noqa: PLC0415
+            adapter = get_adapter(llm_cfg)
+        except Exception as exc:
+            return {"error": f"LLM adapter init failed: {exc}"}
 
     # Run the full summary pipeline (auto-load all accounts)
     summary = handle_portfolio_summary_v0({})
     if "error" in summary:
         return summary
 
-    # Load investor philosophy from profile.yaml (optional — graceful if absent)
-    philosophy: str | None = None
+    # Load full investor profile from profile.yaml (optional — graceful if absent)
+    profile: dict | None = None
     if PROFILE_PATH.exists():
         try:
             with PROFILE_PATH.open("r", encoding="utf-8") as fh:
-                _prof = yaml.safe_load(fh) or {}
-            philosophy = _prof.get("philosophy") or None
+                profile = yaml.safe_load(fh) or None
         except Exception:
-            pass  # non-fatal — commentary works without it
+            pass  # non-fatal — commentary works without profile
+
+    # Fetch live income data (optional — non-fatal if prices unavailable)
+    income_summary: dict | None = None
+    try:
+        prices_result = handle_portfolio_prices_v0({})
+        if "error" not in prices_result:
+            income_summary = prices_result.get("income_summary")
+    except Exception:
+        pass  # non-fatal — commentary works without income data
 
     # Generate commentary — whitelist enforced inside commentary.py
     try:
         from agents.ori_ia.commentary import generate_commentary  # noqa: PLC0415
-        result = generate_commentary(summary, adapter, philosophy=philosophy)
+        result = generate_commentary(summary, adapter, profile=profile, income_summary=income_summary, mode=mode)
     except Exception as exc:
         return {"error": f"Commentary generation failed: {exc}"}
 
@@ -717,6 +782,7 @@ def handle_portfolio_commentary_v0(params: dict) -> dict:
         "commentary":    result["commentary"],
         "provider_used": adapter.provider_label,
         "prompt_length": result["prompt_length"],
+        "mode":          mode,
     }
 
 
@@ -860,6 +926,153 @@ def handle_portfolio_prices_v0(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# handle_portfolio_allocation_v0
+#
+# SECURITY PRINCIPLE: Read-only. Reads targets.yaml from SAFE_PORTFOLIO_DIR
+# only. Computes deviation via pure analytics function — no network calls.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_allocation_v0(params: dict) -> dict:
+    """
+    Load targets.yaml and compare actual asset-class weights against targets.
+
+    Returns allocation deviation rows and rebalancing trade amounts.
+    Returns {"error": "no_targets_file"} if targets.yaml does not exist —
+    callers should treat this as a configuration prompt, not an error.
+    """
+    targets_path = SAFE_PORTFOLIO_DIR / "targets.yaml"
+    if not targets_path.exists():
+        return {"error": "no_targets_file"}
+
+    try:
+        cfg = yaml.safe_load(targets_path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError) as exc:
+        return {"error": f"Failed to read targets.yaml: {exc}"}
+
+    targets = cfg.get("targets") or {}
+    if not targets:
+        return {"error": "targets.yaml exists but defines no targets"}
+
+    tolerance = float(cfg.get("tolerance_pct", 5.0))
+
+    summary = handle_portfolio_summary_v0({})
+    if "error" in summary:
+        return summary
+
+    total_mv  = summary.get("total_market_value", 0.0)
+    positions = summary.get("positions_summary", [])
+
+    result = compute_allocation_deviation(positions, targets, total_mv, tolerance)
+
+    # ── Enrich each row with a per-account-type breakdown ─────────────────
+    # This lets the UI show WHERE to trade (registered vs non-registered),
+    # which is essential for tax-aware rebalancing decisions.
+    #
+    # Build: {sector: {registered: $, non_registered: $, unclassified: $}}
+    sector_acct: dict[str, dict[str, float]] = {}
+    for pos in positions:
+        sector = pos.get("sector") or "Unknown"
+        reg    = pos.get("registered_value",     0.0) or 0.0
+        nreg   = pos.get("non_registered_value", 0.0) or 0.0
+        uncl   = pos.get("unclassified_value",   0.0) or 0.0
+        if sector not in sector_acct:
+            sector_acct[sector] = {"registered": 0.0, "non_registered": 0.0, "unclassified": 0.0}
+        sector_acct[sector]["registered"]     += reg
+        sector_acct[sector]["non_registered"] += nreg
+        sector_acct[sector]["unclassified"]   += uncl
+
+    for row in result.get("rows", []):
+        ac   = row.get("asset_class", "")
+        acct = sector_acct.get(ac, {})
+        row["account_breakdown"] = {
+            "registered":     round(acct.get("registered",     0.0), 2),
+            "non_registered": round(acct.get("non_registered", 0.0), 2),
+            "unclassified":   round(acct.get("unclassified",   0.0), 2),
+        }
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# handle_portfolio_suggest_targets_v0
+#
+# SECURITY PRINCIPLE: Read-only. Reads profile.yaml for risk_score only.
+# No file writes. Pure analytics call — no network calls.
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_suggest_targets_v0(params: dict) -> dict:
+    """
+    Read the investor risk score from profile.yaml and return a suggested
+    target allocation based on the score tier.
+
+    Returns {"error": "no_profile"} when profile.yaml does not exist.
+    Returns {"error": "no_risk_score"} when the derived score is absent.
+    """
+    if not PROFILE_PATH.exists():
+        return {"error": "no_profile"}
+
+    try:
+        profile_data = yaml.safe_load(PROFILE_PATH.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError) as exc:
+        return {"error": f"Failed to read profile.yaml: {exc}"}
+
+    risk_score = (profile_data.get("derived") or {}).get("risk_score")
+    if risk_score is None:
+        return {"error": "no_risk_score"}
+
+    suggestion = suggest_target_allocation(float(risk_score))
+    return {
+        "risk_score":    risk_score,
+        "risk_label":    suggestion["risk_label"],
+        "tolerance_pct": suggestion["tolerance_pct"],
+        "targets":       suggestion["targets"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# handle_portfolio_save_targets_v0
+#
+# SECURITY PRINCIPLE: Writes ONLY to SAFE_PORTFOLIO_DIR/targets.yaml.
+# Validates targets dict (non-empty, all-numeric values) before writing.
+# Overwrites any existing targets.yaml — by design (user accepts suggestion).
+# ---------------------------------------------------------------------------
+
+def handle_portfolio_save_targets_v0(params: dict) -> dict:
+    """
+    Persist a targets dict (and optional tolerance_pct) to targets.yaml.
+
+    Expected params:
+        targets:       {sector: pct, ...}  — required, values must be numeric
+        tolerance_pct: float               — optional, defaults to 5.0
+    """
+    targets = params.get("targets")
+    if not isinstance(targets, dict) or not targets:
+        return {"error": "targets must be a non-empty dict"}
+
+    for k, v in targets.items():
+        if not isinstance(v, (int, float)):
+            return {"error": f"Target value for '{k}' must be numeric, got {v!r}"}
+
+    tolerance = float(params.get("tolerance_pct", 5.0))
+
+    data = {
+        "tolerance_pct": tolerance,
+        "targets": {k: float(v) for k, v in targets.items()},
+    }
+
+    targets_path = SAFE_PORTFOLIO_DIR / "targets.yaml"
+    try:
+        targets_path.write_text(
+            yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        return {"error": f"Failed to write targets.yaml: {exc}"}
+
+    return {"saved": True, "path": str(targets_path)}
+
+
+# ---------------------------------------------------------------------------
 # ACTION REGISTRY
 #
 # SECURITY PRINCIPLE:
@@ -870,16 +1083,45 @@ def handle_portfolio_prices_v0(params: dict) -> dict:
 #
 # If an action is not listed here, it will be marked as "denied".
 # ---------------------------------------------------------------------------
+def handle_portfolio_benchmark_v0(params: dict) -> dict:
+    """
+    Fetch benchmark ETF return for comparison against the portfolio.
+
+    Expected params:
+        benchmark_symbol (str): Yahoo Finance symbol, e.g. "XIU.TO"
+        from_date        (str): Optional YYYY-MM-DD start date (default: Jan 1 this year)
+
+    *** Makes outbound network calls to Yahoo Finance. ***
+    """
+    raw_sym = params.get("benchmark_symbol", "")
+    if not isinstance(raw_sym, str) or not raw_sym.strip():
+        return {"error": "benchmark_symbol must be a non-empty string"}
+
+    from_date = params.get("from_date")
+    if from_date is not None and not isinstance(from_date, str):
+        return {"error": "from_date must be a YYYY-MM-DD string or omitted"}
+
+    try:
+        from agents.ori_ia.market_data import fetch_benchmark_return  # noqa: PLC0415
+        return fetch_benchmark_return(raw_sym.strip(), from_date=from_date)
+    except Exception as exc:
+        return {"error": f"Benchmark fetch failed: {exc}"}
+
+
 ACTION_HANDLERS = {
-    "ping":                        handle_ping,
-    "list_dir":                    handle_list_dir,
-    "portfolio_import_v0":         handle_portfolio_import_v0,
-    "portfolio_summary_v0":        handle_portfolio_summary_v0,
-    "portfolio_snapshot_v0":       handle_portfolio_snapshot_v0,
-    "portfolio_compare_v0":        handle_portfolio_compare_v0,
-    "portfolio_commentary_v0":     handle_portfolio_commentary_v0,
-    "portfolio_profile_v0":        handle_portfolio_profile_v0,
-    "portfolio_prices_v0":         handle_portfolio_prices_v0,
+    "ping":                           handle_ping,
+    "list_dir":                       handle_list_dir,
+    "portfolio_import_v0":            handle_portfolio_import_v0,
+    "portfolio_summary_v0":           handle_portfolio_summary_v0,
+    "portfolio_snapshot_v0":          handle_portfolio_snapshot_v0,
+    "portfolio_compare_v0":           handle_portfolio_compare_v0,
+    "portfolio_commentary_v0":        handle_portfolio_commentary_v0,
+    "portfolio_allocation_v0":        handle_portfolio_allocation_v0,
+    "portfolio_suggest_targets_v0":   handle_portfolio_suggest_targets_v0,
+    "portfolio_save_targets_v0":      handle_portfolio_save_targets_v0,
+    "portfolio_profile_v0":           handle_portfolio_profile_v0,
+    "portfolio_prices_v0":            handle_portfolio_prices_v0,
+    "portfolio_benchmark_v0":         handle_portfolio_benchmark_v0,
 }
 
 

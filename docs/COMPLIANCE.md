@@ -1,4 +1,4 @@
-# ORI Governance & Compliance Framework
+# Auri Governance & Compliance Framework
 Version: 1.0
 
 ---

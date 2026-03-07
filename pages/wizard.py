@@ -108,7 +108,7 @@ if existing_accounts:
             for fname, meta in existing_accounts.items()
         ]
         import pandas as pd
-        st.dataframe(pd.DataFrame(rows_display), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows_display), use_container_width=True, hide_index=True)
 else:
     st.info("No accounts.yaml yet — add your first account below.")
 
@@ -239,7 +239,7 @@ for uf in uploaded_files:
                     f"Updated: `{old_filename}` → `{safe_name}` in accounts.yaml."
                     + (f" Old file deleted." if delete_old else "")
                 )
-                st.page_link("app.py", label="Go to Dashboard and click Refresh")
+                st.page_link("pages/1_Portfolio.py", label="Go to Portfolio and click Refresh")
                 st.rerun()
 
     else:
@@ -289,10 +289,113 @@ for uf in uploaded_files:
                     f"Saved: {safe_name}. "
                     f"{total_now} account(s) now configured in accounts.yaml."
                 )
-                st.page_link("app.py", label="Go to Dashboard and click Refresh")
+                st.page_link("pages/1_Portfolio.py", label="Go to Portfolio and click Refresh")
                 st.rerun()
+
+# ── AI Provider Configuration ──────────────────────────────────────────────
+
+st.divider()
+st.subheader("AI Provider")
+st.caption(
+    "Configure the AI provider used for Portfolio Commentary and portfolio insights. "
+    "Your API key is stored in **~/.auri/config.json** — never committed to the repo."
+)
+
+from agents.ai_provider import (  # noqa: PLC0415
+    PROVIDER_LABELS,
+    is_configured,
+    save_config,
+)
+
+_ai_cfg_path = Path.home() / ".auri" / "config.json"
+_ai_current: dict = {}
+if _ai_cfg_path.exists():
+    import json as _json
+    try:
+        _ai_current = _json.loads(_ai_cfg_path.read_text())
+    except Exception:
+        pass
+
+_cur_provider = _ai_current.get("ai_provider", "groq")
+_cur_key_hint = ("*" * 8 + _ai_current["ai_api_key"][-4:]) if _ai_current.get("ai_api_key") else ""
+_cur_model    = _ai_current.get("ai_model", "")
+
+if is_configured():
+    st.success(
+        f"AI provider configured: **{PROVIDER_LABELS.get(_cur_provider, _cur_provider)}**"
+        + (f"  ·  Key: `{_cur_key_hint}`" if _cur_key_hint else "")
+    )
+else:
+    st.warning("No AI provider configured — Portfolio Commentary will not be available.")
+
+with st.expander("Configure AI provider", expanded=not is_configured()):
+    _provider_options = list(PROVIDER_LABELS.keys())
+    _provider_labels  = list(PROVIDER_LABELS.values())
+    _default_idx      = _provider_options.index(_cur_provider) if _cur_provider in _provider_options else 0
+
+    _sel_provider = st.selectbox(
+        "Provider",
+        options=_provider_options,
+        index=_default_idx,
+        format_func=lambda k: PROVIDER_LABELS[k],
+        key="ai_wizard_provider",
+    )
+
+    # Provider-specific guidance
+    _guides = {
+        "groq":   "Free tier — 14,400 requests/day. Get an API key at **console.groq.com** (no credit card needed).",
+        "claude": "Best quality. Requires an Anthropic API key (separate from Claude.ai subscription) at **console.anthropic.com**.",
+        "openai": "Requires an OpenAI API key at **platform.openai.com** (separate from ChatGPT subscription).",
+        "xai":    "Requires an xAI API key at **console.x.ai** (separate from X Premium subscription).",
+    }
+    st.info(_guides.get(_sel_provider, ""))
+
+    _api_key_input = st.text_input(
+        "API Key",
+        type="password",
+        placeholder="Paste your API key here",
+        value="",
+        key="ai_wizard_key",
+        help="Stored locally in ~/.auri/config.json — never sent anywhere except the provider's API.",
+    )
+
+    _model_input = st.text_input(
+        "Model override (optional)",
+        placeholder="Leave blank for default",
+        value=_cur_model if _cur_provider == _sel_provider else "",
+        key="ai_wizard_model",
+        help="Only needed if you want a specific model version. Leave blank to use the recommended default.",
+    )
+
+    _save_btn, _clear_btn = st.columns([1, 1])
+    with _save_btn:
+        if st.button("Save AI configuration", type="primary", key="ai_wizard_save"):
+            _key = (_api_key_input or "").strip()
+            if not _key:
+                # Allow saving provider+model without re-entering key if already configured
+                if _ai_current.get("ai_api_key"):
+                    _key = _ai_current["ai_api_key"]
+                else:
+                    st.error("API key is required.")
+                    st.stop()
+            save_config(
+                provider=_sel_provider,
+                api_key=_key,
+                model=(_model_input.strip() or None),
+            )
+            st.success(f"Saved! Using **{PROVIDER_LABELS[_sel_provider]}**.")
+            st.rerun()
+
+    with _clear_btn:
+        if _ai_current and st.button("Clear configuration", key="ai_wizard_clear"):
+            try:
+                _ai_cfg_path.unlink(missing_ok=True)
+                st.success("AI configuration cleared.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not clear config: {exc}")
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 
 st.divider()
-st.page_link("app.py", label="Go to Dashboard")
+st.page_link("Home.py", label="Go to Hub")

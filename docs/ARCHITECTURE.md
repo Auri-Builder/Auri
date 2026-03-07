@@ -1,4 +1,4 @@
-# ORI Architecture
+# Auri Architecture
 Version: 1.0
 
 ---

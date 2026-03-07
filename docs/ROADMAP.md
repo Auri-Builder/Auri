@@ -1,11 +1,8 @@
-# ORI Roadmap
-
-Two parallel tracks. See ORI_PERSONAL_VS_COMMERCIAL.md for the full
-architecture split.
+# Auri Roadmap
 
 ---
 
-## ORI Personal
+## Auri Personal
 
 ### Completed
 - v0   — normalize + analytics + governed job actions
@@ -17,10 +14,10 @@ architecture split.
 - D2b  — Cost basis aggregates (per-symbol + portfolio-level P&L)
 - D2c  — UI polish: conditional formatting, P&L summary strip, sort
 - D3   — Governed LLM commentary layer (Ollama / Anthropic / OpenAI / xAI)
-- P1   — ORI Personal transition: profile.yaml, questions.yaml, answers.yaml,
+- P1   — Investor profile: profile.yaml, questions.yaml, answers.yaml,
           deterministic risk scorer, portfolio_profile_v0 action, pages/profile.py
 
-### Next — ORI Personal
+### Next — Auri Personal
 - P2   — Profile → Commentary integration
           Inject risk score and investor objectives into LLM commentary prompt
           so the voice-of-reason output is profile-aware.
@@ -40,7 +37,7 @@ architecture split.
 
 ---
 
-## ORI Commercial
+## Auri Commercial
 
 ### Parked — v0 skeleton (in repo, not wired)
 - ori_commercial_v0/ foundation:

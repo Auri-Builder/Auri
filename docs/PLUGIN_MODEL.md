@@ -1,4 +1,4 @@
-# ORI Plug-In Architecture
+# Auri Plug-In Architecture
 Version: 1.0
 
 ---

@@ -1,4 +1,4 @@
-# ORI Vision Document
+# Auri Vision Document
 Version: 1.0
 Status: Strategic Direction
 

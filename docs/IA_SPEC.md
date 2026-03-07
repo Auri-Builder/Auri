@@ -1,4 +1,4 @@
-# ORI_IA – Investment Advisor Agent
+# IA – Investment Advisor Agent
 Version: 1.0
 
 ---

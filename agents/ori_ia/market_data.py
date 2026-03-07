@@ -67,6 +67,74 @@ def resolve_yahoo_symbol(broker_symbol: str, ref_entry: dict | None) -> str | No
 # Single ticker fetch
 # ---------------------------------------------------------------------------
 
+def _date_to_epoch(date_str: str) -> int:
+    """Convert a YYYY-MM-DD string to a Unix timestamp (UTC midnight)."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+    return int(datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+
+
+_YF_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+_YF_HEADERS   = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
+
+def _yahoo_chart(symbol: str) -> dict:
+    """
+    Fetch price and dividend data via Yahoo Finance v8 chart API (no API key required).
+
+    Returns a dict with:
+        price       : float | None  — regularMarketPrice from meta
+        currency    : str
+        div_rate    : float | None  — trailing 12-month dividend per share
+        div_yield   : float | None  — trailing yield as a decimal (e.g. 0.045)
+    """
+    import time
+    import requests  # noqa: PLC0415
+
+    # Fetch ~13 months of daily data so we capture a full year of dividends
+    now    = int(time.time())
+    p1     = now - 395 * 86400  # ~13 months back
+    resp   = requests.get(
+        _YF_CHART_URL.format(symbol=symbol),
+        params={"interval": "1d", "period1": p1, "period2": now, "events": "dividends"},
+        headers=_YF_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    result_list = resp.json().get("chart", {}).get("result") or []
+    if not result_list:
+        return {}
+
+    chart  = result_list[0]
+    meta   = chart.get("meta", {})
+    price  = meta.get("regularMarketPrice")
+    currency = meta.get("currency", "CAD")
+
+    # Trailing 12-month dividend: sum dividend events from last 365 days
+    cutoff = now - 365 * 86400
+    divs   = chart.get("events", {}).get("dividends", {})
+    annual_divs = sum(
+        float(v["amount"])
+        for v in divs.values()
+        if v.get("date", 0) >= cutoff
+    )
+
+    div_yield = (annual_divs / float(price)) if (price and annual_divs) else None
+
+    return {
+        "price":     float(price) if price else None,
+        "currency":  currency,
+        "div_rate":  round(annual_divs, 4) if annual_divs else None,
+        "div_yield": round(div_yield, 6)   if div_yield  else None,
+    }
+
+
 def _fetch_one(
     broker_symbol: str,
     yahoo_symbol: str,
@@ -74,8 +142,7 @@ def _fetch_one(
     last_price: float | None,
 ) -> dict:
     """
-    Fetch price and dividend data for one symbol from Yahoo Finance.
-
+    Fetch price and dividend data for one symbol via Yahoo Finance v8 chart API.
     Falls back to last_price on any error.
     """
     result: dict[str, Any] = {
@@ -91,45 +158,23 @@ def _fetch_one(
     }
 
     try:
-        import yfinance as yf  # lazy import — network dep, not available in tests
-    except ImportError:
-        result["stale"] = True
-        result["stale_reason"] = "yfinance not installed (pip install yfinance)"
-        result["price"] = last_price
-        return result
+        quote = _yahoo_chart(yahoo_symbol)
 
-    try:
-        ticker = yf.Ticker(yahoo_symbol)
-        info = ticker.info
-
-        # Price — try multiple fields yfinance may use
-        price = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or info.get("navPrice")
-        )
-        if price is None:
+        price = quote.get("price")
+        if not price:
             raise ValueError(f"No price returned for {yahoo_symbol!r}")
 
-        result["price"]    = float(price)
-        result["currency"] = info.get("currency", "CAD")
+        result["price"]    = price
+        result["currency"] = quote.get("currency", "CAD")
 
-        # Dividend data
-        # yfinance 1.x returns dividendYield already as a percentage (e.g. 3.21 = 3.21%)
-        # For ETFs/funds, dividendRate is often None — fall back to yield * price * qty.
-        # The "yield" field (when present) is in decimal form (e.g. 0.0636).
-        div_rate  = info.get("dividendRate")   # None for many ETFs
-        div_yield = info.get("dividendYield") or 0.0
-        yld       = info.get("yield") or 0.0   # decimal, e.g. 0.0636
+        div_rate  = quote.get("div_rate")
+        div_yield = quote.get("div_yield") or 0.0
 
-        result["dividend_rate"]      = float(div_rate) if div_rate else None
-        result["dividend_yield_pct"] = round(float(div_yield), 4)
+        result["dividend_rate"]      = div_rate
+        result["dividend_yield_pct"] = round(div_yield * 100, 4) if div_yield else 0.0
 
         if div_rate and quantity:
-            result["annual_income"] = round(float(div_rate) * float(quantity), 2)
-        elif yld and price and quantity:
-            # ETF/fund: estimate annual income from yield × market value
-            result["annual_income"] = round(float(yld) * float(price) * float(quantity), 2)
+            result["annual_income"] = round(div_rate * quantity, 2)
 
     except Exception as exc:
         logger.warning("market_data: failed to fetch %s (%s): %s", broker_symbol, yahoo_symbol, exc)
@@ -344,3 +389,105 @@ def compute_income_summary(price_data: dict[str, dict]) -> dict:
         "income_positions_usd":     usd_count,
         "positions_without_data":   no_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Benchmark comparison
+# ---------------------------------------------------------------------------
+
+# Well-known Canadian ETF benchmarks for retail investors.
+BENCHMARKS: dict[str, str] = {
+    "XIU.TO — iShares S&P/TSX 60 (Canadian Equity)":  "XIU.TO",
+    "XBAL.TO — iShares Core Balanced (60/40)":         "XBAL.TO",
+    "XGRO.TO — iShares Core Growth (80/20)":           "XGRO.TO",
+    "XCNS.TO — iShares Core Conservative (40/60)":     "XCNS.TO",
+    "VFV.TO — Vanguard S&P 500 (US Equity in CAD)":    "VFV.TO",
+    "XWD.TO — iShares MSCI World (Global Equity)":     "XWD.TO",
+    "ZAG.TO — BMO Aggregate Bond (Canadian Bonds)":    "ZAG.TO",
+}
+
+
+def fetch_benchmark_return(
+    benchmark_symbol: str,
+    from_date: str | None = None,
+) -> dict:
+    """
+    Fetch YTD (or since from_date) total return for a benchmark ETF.
+
+    Parameters
+    ----------
+    benchmark_symbol : str
+        Yahoo Finance symbol, e.g. "XIU.TO".
+    from_date : str | None
+        YYYY-MM-DD start date.  Defaults to current year Jan 1 (YTD).
+
+    Returns
+    -------
+    dict:
+        {
+            "symbol":          str,
+            "from_date":       str,   YYYY-MM-DD
+            "to_date":         str,   YYYY-MM-DD (today)
+            "price_start":     float | None,
+            "price_end":       float | None,
+            "return_pct":      float | None,   e.g. 8.3 for +8.3%
+            "currency":        str,
+            "stale":           bool,
+            "stale_reason":    str | None,
+        }
+
+    *** Makes outbound network calls to Yahoo Finance. ***
+    """
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    today     = date.today()
+    start_dt  = date(today.year, 1, 1) if from_date is None else date.fromisoformat(from_date)
+    # Buffer: fetch a few extra days to guarantee we get a data point on or before start
+    fetch_from = (start_dt - timedelta(days=5)).isoformat()
+    fetch_to   = today.isoformat()
+
+    result: dict = {
+        "symbol":       benchmark_symbol,
+        "from_date":    start_dt.isoformat(),
+        "to_date":      today.isoformat(),
+        "price_start":  None,
+        "price_end":    None,
+        "return_pct":   None,
+        "currency":     "CAD",
+        "stale":        False,
+        "stale_reason": None,
+    }
+
+    try:
+        import requests  # noqa: PLC0415
+
+        # Yahoo Finance v8 chart API — returns OHLCV history, no API key required
+        resp = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{benchmark_symbol}",
+            params={"interval": "1d", "period1": _date_to_epoch(fetch_from), "period2": _date_to_epoch(fetch_to)},
+            headers=_YF_HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        chart = resp.json()["chart"]["result"][0]
+        closes = chart["indicators"]["adjclose"][0]["adjclose"]
+        closes = [c for c in closes if c is not None]
+
+        if len(closes) < 2:
+            raise ValueError(f"Insufficient history data for {benchmark_symbol!r}")
+
+        price_start = float(closes[0])
+        price_end   = float(closes[-1])
+        return_pct  = round((price_end - price_start) / price_start * 100, 2)
+
+        result["price_start"] = round(price_start, 4)
+        result["price_end"]   = round(price_end,   4)
+        result["return_pct"]  = return_pct
+        result["currency"]    = chart["meta"].get("currency", "CAD")
+
+    except Exception as exc:
+        logger.warning("market_data: benchmark fetch failed %s: %s", benchmark_symbol, exc)
+        result["stale"]        = True
+        result["stale_reason"] = str(exc)
+
+    return result

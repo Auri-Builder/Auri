@@ -1,4 +1,4 @@
-# ORI Deployment Model
+# Auri Deployment Model
 Version: 1.0
 Status: Strategic
 

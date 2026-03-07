@@ -1,4 +1,4 @@
-# ORI Foundation Document
+# Auri Foundation Document
 Version: 1.0
 Status: Authoritative
 Owner: Jeff Oxley

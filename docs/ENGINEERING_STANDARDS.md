@@ -1,4 +1,4 @@
-# ORI Engineering Standards
+# Auri Engineering Standards
 Version: 1.0
 
 ---
