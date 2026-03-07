@@ -194,7 +194,7 @@ def _colour_row(row):
 
 
 styled = df.style.apply(_colour_row, axis=1)
-st.dataframe(styled, width="stretch", hide_index=True)
+st.dataframe(styled, use_container_width=True, hide_index=True)
 
 # ── Summary line ─────────────────────────────────────────────────────────────
 
@@ -214,6 +214,6 @@ else:
 st.divider()
 col1, col2 = st.columns(2)
 with col1:
-    st.page_link("app.py", label="Go to Dashboard")
+    st.page_link("Home.py", label="Go to Hub")
 with col2:
     st.page_link("pages/wizard.py", label="Go to Upload Wizard")

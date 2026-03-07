@@ -7,7 +7,7 @@ textColor              = "#1A1A1A"   # Near-black body text
 font                   = "sans serif"
 
 [server]
-# Bind to all interfaces so the dashboard is reachable from oricore.
-# Restrict access via firewall (ufw allow from 192.168.2.0/24 to any port 8501).
+# Bind to all interfaces for LAN access.
+# Restrict access via firewall (e.g. ufw allow from <your-LAN-subnet> to any port 8501).
 address = "0.0.0.0"
 headless = true

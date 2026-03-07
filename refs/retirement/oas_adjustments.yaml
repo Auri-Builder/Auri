@@ -1,0 +1,24 @@
+# OAS Benefit Deferral Increase Factors by Start Age
+# Source: Service Canada
+# Base: OAS monthly amount at age 65 = 1.000 (your "oas_monthly_at_65" from profile)
+#
+# OAS cannot be taken before age 65 (unlike CPP which allows age 60).
+# Deferral past 65 increases benefit by 0.6% per month = 7.2% per year.
+# Maximum deferral: age 70 (60 months = 36% increase).
+#
+# Break-even vs taking at 65:
+#   Deferring to 70: break-even ~age 82–83
+#   With average longevity, deferral is worthwhile for most Canadians in good health.
+#
+# OAS clawback (2026): begins at $93,454 net income; full clawback at ~$151,668.
+# High-income retirees may prefer to start OAS early (before RRIF forces income up).
+#
+# These factors are stable — update only if federal legislation changes.
+
+adjustments:
+  65: 1.000   # base amount
+  66: 1.072   #  7.2% increase
+  67: 1.144   # 14.4% increase
+  68: 1.216   # 21.6% increase
+  69: 1.288   # 28.8% increase
+  70: 1.360   # 36.0% increase (maximum)

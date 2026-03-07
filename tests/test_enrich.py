@@ -19,7 +19,7 @@ _VALID_YAML = textwrap.dedent("""\
 
 class TestLoadSymbolRef(unittest.TestCase):
     def test_returns_empty_if_file_absent(self):
-        missing = Path("/tmp/does_not_exist_oricn_test.yaml")
+        missing = Path("/tmp/does_not_exist_auri_test.yaml")
         result = load_symbol_ref(missing)
         self.assertEqual(result, {})
 

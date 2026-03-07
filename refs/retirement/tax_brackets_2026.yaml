@@ -1,0 +1,111 @@
+# Canadian Federal + Provincial Marginal Tax Brackets — 2026
+# Source: CRA / provincial government rate schedules
+# Update this file each January. No code changes required.
+# NOTE: These are simplified marginal brackets for estimation only.
+#       They do not capture all surtaxes, credits, or phase-outs.
+
+year: 2026
+
+federal:
+  basic_personal_amount: 16129
+  oas_clawback_threshold: 93454   # net income above which OAS clawback begins
+  oas_clawback_rate: 0.15         # fraction (not percent)
+  oas_full_clawback_income: 151668
+  brackets:
+    - {min: 0,       max: 57375,  rate: 15.0}
+    - {min: 57375,   max: 114750, rate: 20.5}
+    - {min: 114750,  max: 158519, rate: 26.0}
+    - {min: 158519,  max: 220000, rate: 29.0}
+    - {min: 220000,  max: null,   rate: 33.0}
+
+provincial:
+  "ON":
+    basic_personal_amount: 11865
+    brackets:
+      - {min: 0,       max: 51446,  rate: 5.05}
+      - {min: 51446,   max: 102894, rate: 9.15}
+      - {min: 102894,  max: 150000, rate: 11.16}
+      - {min: 150000,  max: 220000, rate: 12.16}
+      - {min: 220000,  max: null,   rate: 13.16}
+    # Ontario surtax (simplified: included as flat blended adjustment)
+    # Surtax: 20% on provincial tax > $5,315; additional 36% on provincial tax > $6,802
+    # For Phase 1 we use straight brackets — surtax modelled in Phase 2
+
+  BC:
+    basic_personal_amount: 11981
+    brackets:
+      - {min: 0,       max: 45654,  rate: 5.06}
+      - {min: 45654,   max: 91310,  rate: 7.70}
+      - {min: 91310,   max: 104835, rate: 10.50}
+      - {min: 104835,  max: 127299, rate: 12.29}
+      - {min: 127299,  max: 172602, rate: 14.70}
+      - {min: 172602,  max: 240716, rate: 16.80}
+      - {min: 240716,  max: null,   rate: 20.50}
+
+  AB:
+    basic_personal_amount: 21870
+    brackets:
+      - {min: 0,       max: 148269, rate: 10.0}
+      - {min: 148269,  max: 177922, rate: 12.0}
+      - {min: 177922,  max: 237230, rate: 13.0}
+      - {min: 237230,  max: 355845, rate: 14.0}
+      - {min: 355845,  max: null,   rate: 15.0}
+
+  QC:
+    basic_personal_amount: 17183
+    brackets:
+      - {min: 0,       max: 51780,  rate: 14.0}
+      - {min: 51780,   max: 103545, rate: 19.0}
+      - {min: 103545,  max: 126000, rate: 24.0}
+      - {min: 126000,  max: null,   rate: 25.75}
+
+  MB:
+    basic_personal_amount: 15780
+    brackets:
+      - {min: 0,       max: 47000,  rate: 10.8}
+      - {min: 47000,   max: 100000, rate: 12.75}
+      - {min: 100000,  max: null,   rate: 17.4}
+
+  SK:
+    basic_personal_amount: 17661
+    brackets:
+      - {min: 0,       max: 49720,  rate: 10.5}
+      - {min: 49720,   max: 142058, rate: 12.5}
+      - {min: 142058,  max: null,   rate: 14.5}
+
+  NS:
+    basic_personal_amount: 8481
+    brackets:
+      - {min: 0,       max: 29590,  rate: 8.79}
+      - {min: 29590,   max: 59180,  rate: 14.95}
+      - {min: 59180,   max: 93000,  rate: 16.67}
+      - {min: 93000,   max: 150000, rate: 17.50}
+      - {min: 150000,  max: null,   rate: 21.00}
+
+  NB:
+    basic_personal_amount: 12458
+    brackets:
+      - {min: 0,       max: 47715,  rate: 9.40}
+      - {min: 47715,   max: 95431,  rate: 14.82}
+      - {min: 95431,   max: 176756, rate: 16.52}
+      - {min: 176756,  max: null,   rate: 19.50}
+
+  PE:
+    basic_personal_amount: 12000
+    brackets:
+      - {min: 0,       max: 32656,  rate: 9.65}
+      - {min: 32656,   max: 64313,  rate: 13.63}
+      - {min: 64313,   max: 105000, rate: 16.65}
+      - {min: 105000,  max: 140000, rate: 18.00}
+      - {min: 140000,  max: null,   rate: 18.75}
+
+  NL:
+    basic_personal_amount: 10818
+    brackets:
+      - {min: 0,       max: 43198,  rate: 8.70}
+      - {min: 43198,   max: 86395,  rate: 14.50}
+      - {min: 86395,   max: 154244, rate: 15.80}
+      - {min: 154244,  max: 215943, rate: 17.80}
+      - {min: 215943,  max: 275870, rate: 19.80}
+      - {min: 275870,  max: 551739, rate: 20.80}
+      - {min: 551739,  max: null,   rate: 21.30}

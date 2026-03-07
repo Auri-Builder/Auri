@@ -1,0 +1,31 @@
+# CPP Benefit Actuarial Adjustment Factors by Start Age
+# Source: Service Canada / Employment and Social Development Canada
+# Base: CPP monthly amount at age 65 = 1.000 (your "cpp_monthly_at_65" from profile)
+#
+# Early CPP (age 60–64):
+#   Reduction of 0.6% per month before age 65 = 7.2% per year
+#   At age 60 (60 months early): 60 × 0.6% = 36% reduction → factor 0.640
+#
+# Late CPP (age 66–70):
+#   Increase of 0.7% per month after age 65 = 8.4% per year
+#   At age 70 (60 months late): 60 × 0.7% = 42% increase → factor 1.420
+#
+# Break-even analysis (vs taking at 65):
+#   Early (60): break-even ~age 74
+#   Late (70):  break-even ~age 81–82
+#   Longevity is the key variable. Average Canadian male life expectancy ~82, female ~85.
+#
+# These factors are stable — update only if federal legislation changes.
+
+adjustments:
+  60: 0.640   # 36% reduction (taken 60 months early)
+  61: 0.712   # 28.8% reduction
+  62: 0.784   # 21.6% reduction
+  63: 0.856   # 14.4% reduction
+  64: 0.928   #  7.2% reduction
+  65: 1.000   # base amount
+  66: 1.084   #  8.4% increase
+  67: 1.168   # 16.8% increase
+  68: 1.252   # 25.2% increase
+  69: 1.336   # 33.6% increase
+  70: 1.420   # 42.0% increase (maximum)

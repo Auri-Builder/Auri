@@ -7,7 +7,7 @@ Inputs
 ------
   questions.yaml  — question manifest with weights and scoring rules
                     (tracked in git, no personal data)
-  answers.yaml    — Jeff's answers (gitignored, personal data)
+  answers.yaml    — investor's answers (gitignored, personal data)
 
 Output
 ------

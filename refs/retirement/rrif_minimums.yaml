@@ -1,0 +1,56 @@
+# CRA Prescribed RRIF Minimum Withdrawal Percentages by Age
+# Source: Income Tax Act, Schedule III (subsection 146.3(1))
+# Last verified: 2025. Update if CRA changes the table.
+#
+# Rules:
+#   - RRSP must convert to RRIF by Dec 31 of the year the owner turns 71.
+#   - First RRIF withdrawal is required in the year after conversion (age 72+).
+#   - Minimum % applies to the RRIF balance at January 1 of that year.
+#   - A spouse/common-law partner's age can be used if lower (reduces minimums).
+#   - No maximum withdrawal — only a floor.
+#
+# Key planning note: at age 72+ the minimums can force more withdrawal than
+# needed for spending — the excess lands in a taxable account. Plan early.
+
+minimums:
+  55: 2.86
+  56: 2.94
+  57: 3.03
+  58: 3.13
+  59: 3.23
+  60: 3.33
+  61: 3.45
+  62: 3.57
+  63: 3.70
+  64: 3.85
+  65: 4.00
+  66: 4.17
+  67: 4.35
+  68: 4.55
+  69: 4.76
+  70: 5.00
+  71: 5.28
+  72: 5.40
+  73: 5.53
+  74: 5.67
+  75: 5.82
+  76: 5.98
+  77: 6.17
+  78: 6.36
+  79: 6.58
+  80: 6.82
+  81: 7.08
+  82: 7.38
+  83: 7.71
+  84: 8.08
+  85: 8.51
+  86: 8.99
+  87: 9.55
+  88: 10.21
+  89: 10.99
+  90: 11.92
+  91: 13.06
+  92: 14.49
+  93: 16.34
+  94: 18.79
+  95: 20.00  # CRA caps at 20% for age 95+

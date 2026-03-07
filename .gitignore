@@ -36,6 +36,12 @@ data/portfolio/accounts.yaml
 # ORI Personal — personal investor profile and answers, never commit
 data/portfolio/profile.yaml
 data/portfolio/answers.yaml
+data/portfolio/targets.yaml
+
+# Retirement Planner — personal financial data and scenario outputs, never commit
+data/retirement/retirement_profile.yaml
+data/retirement/scenarios/
+data/retirement/reports/
 
 # Logs
 *.log
@@ -54,3 +60,4 @@ dashboard.yaml
 # LLM provider config — may contain model names and provider choices
 # API keys must never be stored here; read from env vars only
 llm_config.yaml
+

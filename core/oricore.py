@@ -42,7 +42,7 @@ def load_config():
         return {}
 
 def startup_banner():
-    print("\n[bold green]OriCN Core Initializing...[/bold green]")
+    print("\n[bold green]Auri Core Initializing...[/bold green]")
     print(f"[cyan]Timestamp:[/cyan] {datetime.now()}")
     print("[cyan]Mode:[/cyan] Controlled Startup\n")
 

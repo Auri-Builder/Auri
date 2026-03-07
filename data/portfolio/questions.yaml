@@ -1,6 +1,6 @@
-# ORI Personal — Risk-Profiling Questionnaire
+# Auri — Risk-Profiling Questionnaire
 # This file is a TEMPLATE tracked in git. It contains no personal data.
-# Jeff's answers live in data/portfolio/answers.yaml (gitignored).
+# Your answers live in data/portfolio/answers.yaml (gitignored).
 #
 # answer_type:
 #   choice  — pick one value from the `options` list

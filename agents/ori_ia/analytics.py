@@ -396,6 +396,110 @@ def compute_positions_summary(
     return sorted(result, key=lambda p: p["market_value"], reverse=True)
 
 
+def check_policy(summary: dict, constraints: dict) -> list[dict]:
+    """
+    Check portfolio summary against investor-defined policy constraints.
+
+    Args:
+        summary:     Output of build_summary().
+        constraints: The 'constraints' block from profile.yaml, e.g.:
+                       max_single_position_pct: 20.0
+                       max_sector_pct: 40.0
+                       excluded_sectors: ["Tobacco"]
+
+    Returns:
+        List of policy flag dicts, each:
+            {
+                "type":      "position" | "sector" | "excluded_sector",
+                "name":      str,    # symbol or sector name
+                "value_pct": float,  # actual weight
+                "limit_pct": float | None,
+                "severity":  "breach" | "warning",
+                "message":   str,
+            }
+        Empty list if no constraints are set or no violations found.
+
+    Severity thresholds:
+        breach  — value exceeds the limit
+        warning — value is within 15% below the limit (>= 85% of limit)
+    """
+    if not constraints:
+        return []
+
+    flags: list[dict] = []
+    _WARNING_RATIO = 0.85  # flag as warning when >= 85% of the limit
+
+    max_pos  = constraints.get("max_single_position_pct")
+    max_sec  = constraints.get("max_sector_pct")
+    excluded = [s.lower() for s in (constraints.get("excluded_sectors") or [])]
+
+    # ── Position concentration ────────────────────────────────────────────
+    if max_pos is not None:
+        for pos in summary.get("positions_summary", []):
+            sym = pos.get("symbol", "?")
+            wt  = pos.get("weight_pct", 0.0) or 0.0
+            if wt > max_pos:
+                flags.append({
+                    "type":      "position",
+                    "name":      sym,
+                    "value_pct": round(wt, 2),
+                    "limit_pct": max_pos,
+                    "severity":  "breach",
+                    "message":   f"{sym} at {wt:.1f}% exceeds max position limit of {max_pos:.0f}%",
+                })
+            elif wt >= max_pos * _WARNING_RATIO:
+                flags.append({
+                    "type":      "position",
+                    "name":      sym,
+                    "value_pct": round(wt, 2),
+                    "limit_pct": max_pos,
+                    "severity":  "warning",
+                    "message":   f"{sym} at {wt:.1f}% is approaching max position limit of {max_pos:.0f}%",
+                })
+
+    # ── Sector concentration ──────────────────────────────────────────────
+    if max_sec is not None:
+        for sector, pct in summary.get("sector_weights_pct", {}).items():
+            if pct > max_sec:
+                flags.append({
+                    "type":      "sector",
+                    "name":      sector,
+                    "value_pct": round(pct, 2),
+                    "limit_pct": max_sec,
+                    "severity":  "breach",
+                    "message":   f"{sector} at {pct:.1f}% exceeds max sector limit of {max_sec:.0f}%",
+                })
+            elif pct >= max_sec * _WARNING_RATIO:
+                flags.append({
+                    "type":      "sector",
+                    "name":      sector,
+                    "value_pct": round(pct, 2),
+                    "limit_pct": max_sec,
+                    "severity":  "warning",
+                    "message":   f"{sector} at {pct:.1f}% is approaching max sector limit of {max_sec:.0f}%",
+                })
+
+    # ── Excluded sectors ──────────────────────────────────────────────────
+    if excluded:
+        for pos in summary.get("positions_summary", []):
+            sym    = pos.get("symbol", "?")
+            sector = (pos.get("sector") or "").lower()
+            wt     = pos.get("weight_pct", 0.0) or 0.0
+            if sector in excluded:
+                flags.append({
+                    "type":      "excluded_sector",
+                    "name":      sym,
+                    "value_pct": round(wt, 2),
+                    "limit_pct": 0.0,
+                    "severity":  "breach",
+                    "message":   f"{sym} is in excluded sector '{pos.get('sector')}'",
+                })
+
+    # Sort: breaches first, then warnings; within each group by value descending
+    flags.sort(key=lambda f: (0 if f["severity"] == "breach" else 1, -f["value_pct"]))
+    return flags
+
+
 def build_summary(
     rows: list[dict],
     concentration_threshold: float = 0.10,
@@ -471,4 +575,192 @@ def build_summary(
             1 for p in positions_summary
             if abs(p.get("reconciliation_delta", 0.0)) >= 0.01
         ),
+    }
+
+
+def suggest_target_allocation(risk_score: float) -> dict:
+    """
+    Map a risk score (0–100) to a suggested sector target allocation for
+    a Canadian retail investor.
+
+    Score tiers:
+        0–30   Conservative  — heavy fixed income, minimal equity, modest international
+        31–50  Moderate      — balanced income/equity, some international diversification
+        51–70  Growth        — equity-tilted, international developed + emerging markets
+        71–100 Aggressive    — high equity, full global diversification, minimal income
+
+    All templates include international developed and emerging-market exposure
+    to reduce the Canadian home-country + US concentration bias.
+
+    Returns:
+        {
+            "risk_label":    str,        e.g. "Growth"
+            "tolerance_pct": float,      suggested rebalancing tolerance band
+            "targets":       {sector: pct},  values sum to 100.0
+        }
+    """
+    if risk_score <= 30:
+        label        = "Conservative"
+        tolerance    = 5.0
+        targets = {
+            "Equities - Canada":        10.0,
+            "Equities - US":             8.0,
+            "Equities - International":  7.0,   # developed markets (EAFE)
+            "Fixed Income":             50.0,
+            "Money Market":             10.0,
+            "Real Estate":               5.0,
+            "Energy":                    5.0,
+            "Financials":                5.0,
+        }
+    elif risk_score <= 50:
+        label        = "Moderate"
+        tolerance    = 5.0
+        targets = {
+            "Equities - Canada":        18.0,
+            "Equities - US":            18.0,
+            "Equities - International":  9.0,   # developed markets (EAFE)
+            "Equities - Emerging":       5.0,   # emerging markets (EM)
+            "Fixed Income":             20.0,
+            "Money Market":              5.0,
+            "Real Estate":               5.0,
+            "Energy":                   10.0,
+            "Healthcare":               10.0,
+        }
+    elif risk_score <= 70:
+        label        = "Growth"
+        tolerance    = 5.0
+        targets = {
+            "Equities - Canada":        20.0,
+            "Equities - US":            22.0,
+            "Equities - International": 13.0,   # developed markets (EAFE)
+            "Equities - Emerging":       5.0,   # emerging markets (EM)
+            "Financials":               10.0,
+            "Fixed Income":             10.0,
+            "Money Market":              5.0,
+            "Real Estate":               5.0,
+            "Energy":                    5.0,
+            "Healthcare":                5.0,
+        }
+    else:
+        label        = "Aggressive"
+        tolerance    = 7.0
+        targets = {
+            "Equities - Canada":        20.0,
+            "Equities - US":            28.0,
+            "Equities - International": 15.0,   # developed markets (EAFE)
+            "Equities - Emerging":      10.0,   # emerging markets (EM)
+            "Financials":                7.0,
+            "Fixed Income":              5.0,
+            "Real Estate":               5.0,
+            "Energy":                    5.0,
+            "Healthcare":                5.0,
+        }
+
+    # Drop zero-weight sectors to keep the YAML tidy
+    targets = {k: v for k, v in targets.items() if v > 0}
+
+    return {
+        "risk_label":    label,
+        "tolerance_pct": tolerance,
+        "targets":       targets,
+    }
+
+
+def compute_allocation_deviation(
+    positions_summary: list[dict],
+    targets: dict[str, float],
+    total_mv: float,
+    tolerance_pct: float = 5.0,
+) -> dict:
+    """
+    Compare actual asset-class weights against user-defined target percentages.
+
+    Args:
+        positions_summary: Per-symbol list from build_summary() / compute_positions_summary().
+        targets:           {asset_class: target_pct, ...}  — values in percent (e.g. 60.0).
+        total_mv:          Total portfolio market value in base currency.
+        tolerance_pct:     Deviation threshold below which a band is considered "on target".
+
+    Returns:
+        {
+            "total_market_value": float,
+            "target_sum_pct":     float,
+            "tolerance_pct":      float,
+            "rows": [
+                {
+                    "asset_class":      str,
+                    "actual_pct":       float,
+                    "target_pct":       float,
+                    "deviation_pct":    float,   # actual - target; negative = underweight
+                    "actual_value":     float,
+                    "target_value":     float,
+                    "rebalance_amount": float,   # positive = buy, negative = sell
+                    "status":           "over" | "under" | "on_target",
+                },
+                ...
+            ],
+            "untracked": [
+                {"asset_class": str, "actual_pct": float, "actual_value": float},
+                ...
+            ],
+        }
+    """
+    # Aggregate actual market value per sector from positions
+    actual_values: dict[str, float] = {}
+    for pos in positions_summary:
+        ac = pos.get("sector") or "Unknown"
+        mv = pos.get("market_value") or 0.0
+        actual_values[ac] = actual_values.get(ac, 0.0) + mv
+
+    # Actual % per sector (safe against zero total_mv)
+    def _pct(v: float) -> float:
+        return round(v / total_mv * 100, 2) if total_mv > 0 else 0.0
+
+    target_sum = round(sum(targets.values()), 2)
+
+    rows = []
+    for ac, target_pct in sorted(targets.items()):
+        actual_val = actual_values.get(ac, 0.0)
+        actual_pct = _pct(actual_val)
+        deviation  = round(actual_pct - target_pct, 2)
+        target_val = round(target_pct / 100 * total_mv, 2)
+        rebalance  = round(target_val - actual_val, 2)
+
+        if deviation > tolerance_pct:
+            status = "over"
+        elif deviation < -tolerance_pct:
+            status = "under"
+        else:
+            status = "on_target"
+
+        rows.append({
+            "asset_class":      ac,
+            "actual_pct":       actual_pct,
+            "target_pct":       target_pct,
+            "deviation_pct":    deviation,
+            "actual_value":     round(actual_val, 2),
+            "target_value":     target_val,
+            "rebalance_amount": rebalance,
+            "status":           status,
+        })
+
+    # Asset classes present in the portfolio but not in targets
+    untracked = sorted(
+        {ac for ac in actual_values if ac not in targets}
+    )
+    untracked_rows = [
+        {
+            "asset_class":  ac,
+            "actual_pct":   _pct(actual_values[ac]),
+            "actual_value": round(actual_values[ac], 2),
+        }
+        for ac in untracked
+    ]
+
+    return {
+        "total_market_value": round(total_mv, 2),
+        "target_sum_pct":     target_sum,
+        "tolerance_pct":      tolerance_pct,
+        "rows":               rows,
+        "untracked":          untracked_rows,
     }

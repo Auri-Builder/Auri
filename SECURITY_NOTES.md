@@ -1,4 +1,4 @@
-# Ori Security Notes
+# Auri Security Notes
 
 ## 2026-02-22 — Governance Hardening Phase 1
 
@@ -24,11 +24,11 @@
      - outbox
      - failed
      - logs
-   - Ensures only the `cplus` user can read/write job artifacts.
+   - Ensures only the owner user can read/write job artifacts.
 
 5. **Execution Separation**
-   - OriCore submits jobs only.
-   - OriCN executes jobs.
+   - Orchestration layer submits jobs only.
+   - Execution layer runs jobs.
    - No direct command execution in control plane.
 
 ---
@@ -39,7 +39,7 @@ Defense in depth:
 
 1. Network boundary (private LAN, SSH keys)
 2. OS-level permission enforcement
-3. Ori policy enforcement (allowlist + deny-by-default)
+3. Auri policy enforcement (allowlist + deny-by-default)
 4. Workspace sandbox (PROJECT_ROOT constraint)
 
 ---

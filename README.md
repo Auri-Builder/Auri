@@ -1,194 +1,167 @@
-You are now operating inside the ORI intelligence framework.
+# Auri — Personal Investment Intelligence
 
-ORI is a governed, modular personal intelligence system.
-
-You must:
-
-1. Respect separation between orchestration (OriCore) and execution (OriCN).
-2. Never recommend bypassing governance.
-3. Never suggest autonomous execution.
-4. Treat external LLM usage as consultative only.
-5. Prioritize security and reduced attack surface.
-6. Operate within documented system specifications.
-
-All decisions must align with:
-- Explicit approval
-- Modular design
-- Hybrid memory architecture
-- Explainability
-- Non-autonomous constraints
-
-You are assisting in developing ORI agents and architecture.
-
-If a suggestion violates governance principles, you must explicitly state that it does.
-
-Confirm understanding before proceeding.
+A governed, offline-first portfolio analytics system for self-hosted use.
+Ingests broker CSV exports, produces structured portfolio analysis, and
+generates profile-aware LLM commentary — with no cloud dependency by default.
 
 ---
 
-## How to Run ORI_IA v0
+## What it does
 
-### Prerequisites
+- Parses TD WebBroker CSV exports (and similar broker formats) into a canonical schema
+- Aggregates holdings across multiple accounts (TFSA, RRSP, CASH, RESP, etc.)
+- Computes sector weights, P&L, concentration flags, and account-type splits
+- Fetches live prices and dividend income from Yahoo Finance (on demand)
+- Generates LLM portfolio commentary via Ollama (local), Anthropic, OpenAI, or xAI
+- Maintains an investor risk profile and injects it into commentary prompts
+- Saves point-in-time snapshots for portfolio comparison over time
+- All via a Streamlit dashboard — no external services required in default mode
 
-Activate the project virtualenv from the project root:
+---
+
+## Design principles
+
+- **Offline by default** — no network calls unless explicitly requested
+- **Governed** — all actions go through an approval gate and job queue
+- **No raw data to LLM** — only whitelisted aggregates reach the AI layer
+- **Gitignored financials** — CSV files, profile, answers, and account manifests never committed
+
+---
+
+## Prerequisites
+
+- Python 3.12+
+- [Ollama](https://ollama.com) (optional — for local LLM commentary)
+- A broker that exports CSV holdings (tested with TD WebBroker)
+
+---
+
+## Setup
 
 ```bash
-cd /home/cplus/oricn
+git clone https://github.com/your-username/auri.git
+cd auri
+python3 -m venv env
 source env/bin/activate
+pip install -r requirements-dev.txt
 ```
-
-Always invoke Python as a module (`python -m ...`) so the project root
-is automatically on `sys.path`. Do not use `python core/job_runner.py`
-directly — the agent imports will fail.
 
 ---
 
-### 1. Create accounts.yaml (required)
+## Configuration
 
-`portfolio_summary_v0` will not run without this manifest. Every CSV you
-intend to process must be declared here. The file is gitignored and will
-never be committed.
+### 1. accounts.yaml (required)
 
-Create `data/portfolio/accounts.yaml` with the following structure:
+Create `data/portfolio/accounts.yaml` to declare your CSV files:
 
 ```yaml
 accounts:
   holdings.csv:
-    account_id:   "ACCT-001"          # your internal reference
+    account_id:   "ACCT-001"
     account_name: "My TFSA"
-    account_type: "TFSA"              # required — drives registered/non-registered split
-    institution:  "TD"
-    owner:        "Jeff"              # optional
-    currency:     "CAD"              # optional default; row-level currency takes priority
-
-  rrsp.csv:
-    account_id:   "ACCT-002"
-    account_name: "My RRSP"
-    account_type: "RRSP"
+    account_type: "TFSA"          # TFSA | RRSP | RRIF | RESP | CASH | USD_CASH
     institution:  "TD"
     currency:     "CAD"
 ```
 
-Rules:
-- The key (`holdings.csv`) must match the CSV **filename exactly** (not the full path).
-- `account_type` is **required** per entry — determines registered vs non-registered.
-- All other fields are optional but recommended.
-- Manifest fields only fill in what the CSV itself does not supply (CSV data wins).
+This file is gitignored and will never be committed.
 
----
-
-### 2. Place your CSV export(s)
-
-Copy broker CSV exports into the safe portfolio directory:
+### 2. Place your CSV exports
 
 ```
 data/portfolio/holdings.csv
-data/portfolio/rrsp.csv     # optional second account
+data/portfolio/rrsp.csv    # additional accounts as needed
 ```
 
-These paths are gitignored (`*.csv` is excluded). Files will never be committed.
+All `*.csv` files in `data/portfolio/` are gitignored.
+
+### 3. (Optional) LLM commentary
+
+For local Ollama (default — no API key needed):
+```bash
+ollama pull llama3.2
+```
+
+For a cloud provider, create `llm_config.yaml` (gitignored):
+```yaml
+provider: cloud
+cloud:
+  provider: anthropic   # anthropic | openai | xai
+  model: claude-haiku-4-5-20251001
+```
+
+Then export your API key before starting the app:
+```bash
+export ANTHROPIC_API_KEY=sk-...
+```
 
 ---
 
-### 3. Start the job runner (OriCN terminal)
+## Running the dashboard
 
+**Dev mode** (no job runner needed) — create `dashboard.yaml` at the repo root:
+```yaml
+dev_direct_call: true
+```
+
+Then start the app:
+```bash
+source env/bin/activate
+python -m streamlit run Home.py
+```
+
+Opens at `http://localhost:8501`.
+
+**Governed mode** (default) — run the job runner in a separate terminal:
 ```bash
 python -m core.job_runner
 ```
 
-The runner watches `inbox/` and processes jobs as they arrive.
-Leave this running in a separate terminal.
+Then start the app without `dashboard.yaml`.
 
 ---
 
-### 4. Submit jobs (OriCore terminal)
+## Investor profile
 
-**Ping (regression check — confirms the runner is alive):**
+The risk-profiling questionnaire is at `data/portfolio/questions.yaml`.
+Answer it via the Profile page in the dashboard, or by creating
+`data/portfolio/answers.yaml` directly (gitignored).
 
-```bash
-python -m core.submit_job_cli ping
+The profile drives:
+- A deterministic risk score (0–100)
+- Profile-aware LLM commentary (goals, constraints, retirement context, income coverage)
+
+---
+
+## Security
+
+- CSV files and personal data are confined to `data/portfolio/` and gitignored
+- Path traversal outside the project root is denied at the job runner level
+- The LLM receives only whitelisted aggregate fields — no account identifiers,
+  file paths, or institution names
+- See [SECURITY_NOTES.md](SECURITY_NOTES.md) for full hardening notes
+
+---
+
+## Project structure
+
 ```
-
-**portfolio_import_v0 — validate and count rows (no manifest required):**
-
-```bash
-python -m core.submit_job_cli portfolio_import_v0 \
-    csv_path=data/portfolio/holdings.csv
-```
-
-Returns: row count, canonical fields detected, unrecognized columns.
-No financial values are included in the output.
-
-**Test 1 — summary with a single CSV (must be in accounts.yaml):**
-
-```bash
-python -m core.submit_job_cli portfolio_summary_v0 \
-    csv_path=data/portfolio/holdings.csv \
-    concentration_threshold=0.10 \
-    top_n=5
-```
-
-**Test 2 — summary merging multiple accounts:**
-
-```bash
-python -m core.submit_job_cli portfolio_summary_v0 \
-    "csv_paths=[data/portfolio/holdings.csv,data/portfolio/rrsp.csv]" \
-    top_n=5
-```
-
-Note: the `csv_paths` list must be provided as JSON when using the CLI directly;
-see `core/oricore.py` `submit_and_wait` for programmatic use.
-
-**Test 3 — failure when a CSV is not declared in accounts.yaml:**
-
-```bash
-python -m core.submit_job_cli portfolio_summary_v0 \
-    csv_path=data/portfolio/unlisted.csv
-```
-
-Expected: `status: failed`, error message naming the missing manifest entry.
-
-**Skip approval gate for scripted smoke tests:**
-
-```bash
-python -m core.submit_job_cli ping --no-approval
+agents/ori_ia/      Analytics, normalization, enrichment, LLM adapter
+core/               Job runner, job queue, CLI
+data/portfolio/     CSV exports + manifest (gitignored)
+data/derived/       Saved snapshots (gitignored)
+docs/               Architecture and specification documents
+pages/              Streamlit pages (wizard, health, snapshots, profile)
+refs/symbols.yaml   Symbol reference data (sector, asset class, Yahoo ticker overrides)
+tests/              Pytest test suite
+app.py              Streamlit dashboard entry point
 ```
 
 ---
 
-### 5. Read the result
+## Running tests
 
-Results are written to `outbox/<job_id>.json` and printed to stdout
-by the CLI. Example summary output:
-
-```json
-{
-  "job_id": "...",
-  "action": "portfolio_summary_v0",
-  "status": "ok",
-  "output": {
-    "total_market_value": 127500.00,
-    "position_count": 12,
-    "unique_symbols": 10,
-    "top_positions": [
-      {"symbol": "XEI.TO", "weight_pct": 18.4},
-      {"symbol": "VFV.TO", "weight_pct": 15.2}
-    ],
-    "sector_weights_pct": {"Financials": 32.1, "Technology": 22.8, "unknown": 15.0},
-    "account_type_split": {"registered": 85000.00, "non_registered": 42500.00},
-    "concentration_flags": [
-      {"symbol": "XEI.TO", "weight_pct": 18.4, "flag": "CONCENTRATION_ALERT"}
-    ],
-    "concentration_threshold_pct": 10.0
-  }
-}
+```bash
+source env/bin/activate
+python -m pytest
 ```
-
----
-
-### Security reminders
-
-- CSV files placed in `data/portfolio/` are gitignored and will not be committed.
-- The job runner confines all CSV access to `data/portfolio/` — path traversal attempts are denied.
-- No financial row data appears in job outputs — only aggregates and counts.
-- All actions require explicit approval (approval gate in `core/oricore.py`) unless `--no-approval` is passed.

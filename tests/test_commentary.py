@@ -287,14 +287,42 @@ class TestGetAdapterConfig:
         adapter = get_adapter({"provider": "cloud", "cloud": {"provider": "openai"}})
         assert isinstance(adapter, CloudOpenAIAdapter)
 
+    def test_cloud_xai_missing_key_raises(self, monkeypatch):
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="XAI_API_KEY"):
+            get_adapter({"provider": "cloud", "cloud": {"provider": "xai"}})
+
+    def test_cloud_xai_with_key(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+        adapter = get_adapter({"provider": "cloud", "cloud": {"provider": "xai"}})
+        assert isinstance(adapter, CloudOpenAIAdapter)
+
+    def test_cloud_xai_base_url(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+        adapter = get_adapter({"provider": "cloud", "cloud": {"provider": "xai"}})
+        assert adapter.base_url == "https://api.x.ai/v1"
+
+    def test_cloud_xai_default_model(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+        adapter = get_adapter({"provider": "cloud", "cloud": {"provider": "xai"}})
+        assert adapter.model == "grok-3-mini"
+
+    def test_cloud_xai_custom_model(self, monkeypatch):
+        monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+        adapter = get_adapter({"provider": "cloud", "cloud": {"provider": "xai", "model": "grok-3"}})
+        assert adapter.model == "grok-3"
+
     def test_provider_labels(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+        monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
 
         local   = get_adapter({"provider": "local", "local": {"model": "llama3.2"}})
         claude  = get_adapter({"provider": "cloud", "cloud": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}})
         openai_ = get_adapter({"provider": "cloud", "cloud": {"provider": "openai",    "model": "gpt-4o-mini"}})
+        xai_    = get_adapter({"provider": "cloud", "cloud": {"provider": "xai",       "model": "grok-3-mini"}})
 
         assert "local"     in local.provider_label
         assert "anthropic" in claude.provider_label
         assert "openai"    in openai_.provider_label
+        assert "xai"       in xai_.provider_label

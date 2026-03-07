@@ -1,0 +1,16 @@
+# Portfolio Volatility by Asset Mix — for Phase 3 Monte Carlo
+# Standard deviation of annual returns used in numpy.random.normal(mu, sigma, 500).
+# Source: long-run Canadian balanced fund historical data (blended).
+# Update if asset mix definitions change. Do not change without understanding
+# how Phase 3 Monte Carlo draws from these figures.
+#
+# Usage (Phase 3):
+#   sigma = volatility[asset_mix]
+#   returns = numpy.random.normal(mu=scenario_return, sigma=sigma, size=500)
+#   for each sim: balance *= product of (1 + r/100) per year
+
+volatility:
+  Conservative: 8.0    # bonds-heavy ~40/60; σ ≈ 8% historically
+  Balanced:    12.0    # 60/40 equity/bond; σ ≈ 12%
+  Growth:      15.0    # 80/20 equity/bond; σ ≈ 15%
+  Aggressive:  18.0    # near-100% equity; σ ≈ 18%
