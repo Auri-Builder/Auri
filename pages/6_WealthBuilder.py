@@ -1,5 +1,5 @@
 """
-pages/7_WealthBuilder.py
+pages/6_WealthBuilder.py
 ------------------------
 Auri Wealth Builder — accumulation-phase financial planning.
 
@@ -186,14 +186,20 @@ def _tab_projector(profile: dict) -> None:
 
     fin = profile.get("financials", {})
 
+    # Pre-populate current savings from loaded portfolio if available
+    _portfolio_mv = _get_portfolio_market_value()
+    _savings_default = int(fin.get("current_savings", _portfolio_mv or 150_000))
+    if _portfolio_mv:
+        st.info(f"Current savings pre-populated from your portfolio CSV: **${_portfolio_mv:,.0f}**. Adjust if you have additional savings outside the portfolio (e.g. home equity, other accounts).")
+
     with st.form("projector_form"):
         c1, c2, c3 = st.columns(3)
         current_age    = c1.number_input("Current Age", min_value=18, max_value=70,
                                           value=int(fin.get("current_age", 35)), step=1)
         target_ret_age = c2.number_input("Target Retirement Age", min_value=40, max_value=75,
                                           value=int(fin.get("target_retirement_age", 60)), step=1)
-        current_savings = c3.number_input("Current Total Savings ($)", min_value=0, max_value=5_000_000,
-                                           value=int(fin.get("current_savings", 150_000)), step=5_000)
+        current_savings = c3.number_input("Current Total Savings ($)", min_value=0, max_value=10_000_000,
+                                           value=_savings_default, step=5_000)
 
         c4, c5, c6 = st.columns(3)
         annual_income   = c4.number_input("Gross Annual Income ($)", min_value=0, max_value=1_000_000,
@@ -424,12 +430,12 @@ def _tab_rebalancer(profile: dict) -> None:
 
     # ── Holdings input ────────────────────────────────────────────────────
     st.markdown("**Enter Holdings**")
-    st.caption("Add each position's approximate market value and asset class. Use 'equity', 'bond', 'gic', or 'cash'.")
+    st.caption("Pre-populated from your loaded portfolio CSV. Adjust asset classes as needed: equity, etf, bond, gic, cash, reit.")
 
     # Try to pre-populate from Portfolio session state
     _portfolio_holdings = _get_portfolio_holdings()
 
-    n_positions = st.number_input("Number of positions", min_value=1, max_value=20, value=max(3, len(_portfolio_holdings)), step=1)
+    n_positions = st.number_input("Number of positions", min_value=1, max_value=20, value=min(20, max(3, len(_portfolio_holdings))), step=1)
     holdings_data = []
 
     with st.form("rebalancer_form"):
@@ -439,11 +445,10 @@ def _tab_rebalancer(profile: dict) -> None:
             sym   = r1.text_input(f"Symbol / Name #{i+1}", value=pre.get("symbol", ""), key=f"reb_sym_{i}")
             val   = r2.number_input(f"Market Value ($) #{i+1}", min_value=0, max_value=5_000_000,
                                      value=int(pre.get("value", 0)), step=100, key=f"reb_val_{i}")
-            ac    = r3.selectbox(f"Asset Class #{i+1}",
-                                  ["equity", "bond", "gic", "cash", "reit", "other"],
-                                  index=["equity","bond","gic","cash","reit","other"].index(
-                                      pre.get("asset_class", "equity")),
-                                  key=f"reb_ac_{i}")
+            _ac_opts = ["equity", "etf", "bond", "gic", "cash", "reit", "other"]
+            _ac_val  = pre.get("asset_class", "equity")
+            _ac_idx  = _ac_opts.index(_ac_val) if _ac_val in _ac_opts else 0
+            ac    = r3.selectbox(f"Asset Class #{i+1}", _ac_opts, index=_ac_idx, key=f"reb_ac_{i}")
             if sym and val > 0:
                 holdings_data.append({"symbol": sym, "value": val, "asset_class": ac})
 
@@ -529,8 +534,49 @@ def _tab_rebalancer(profile: dict) -> None:
         st.warning(f"Could not classify: {', '.join(result.unclassified)}. These are excluded from drift calculation.")
 
 
+def _get_portfolio_market_value() -> float:
+    """Return total portfolio market value from loaded CSV + live prices. 0 if not loaded."""
+    try:
+        from core.dashboard_cache import load_summary
+        summary    = load_summary()
+        positions  = summary.get("positions_summary", [])
+        price_data = st.session_state.get("price_data", {}).get("price_data", {})
+        total = 0.0
+        for p in positions:
+            sym   = str(p.get("symbol", "")).upper()
+            price = (price_data.get(sym, {}).get("price") or 0)
+            qty   = float(p.get("quantity") or 0)
+            mv    = (price * qty) if price and qty else float(p.get("market_value") or 0)
+            total += mv
+        return round(total, 0) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+_AC_NORMALISE = {
+    "equity":       "equity",
+    "equities":     "equity",
+    "stock":        "equity",
+    "etf":          "etf",
+    "reit":         "reit",
+    "trust":        "reit",    # income trusts → treat as equity-like
+    "lp":           "reit",    # limited partnerships → equity-like
+    "bond":         "bond",
+    "bonds":        "bond",
+    "fixed income": "bond",
+    "gic":          "gic",
+    "gics":         "gic",
+    "preferred":    "bond",
+    "mutual fund":  "bond",    # most in our portfolio are fixed income funds
+    "money market": "cash",
+    "cash":         "cash",
+    "savings":      "cash",
+    "unknown":      "equity",  # default assumption
+}
+
+
 def _get_portfolio_holdings() -> list[dict]:
-    """Try to read holdings from Portfolio session state."""
+    """Read holdings from the cached portfolio summary (loaded from CSV)."""
     try:
         from core.dashboard_cache import load_summary
         summary = load_summary()
@@ -543,7 +589,8 @@ def _get_portfolio_holdings() -> list[dict]:
             price = (price_data.get(sym, {}).get("price") or 0)
             qty   = float(p.get("quantity") or 0)
             mv    = (price * qty) if price and qty else float(p.get("market_value") or 0)
-            ac    = str(p.get("asset_class", "equity")).lower()
+            raw_ac = str(p.get("asset_class", "equity")).lower().strip()
+            ac = _AC_NORMALISE.get(raw_ac, "equity")
             if mv > 0:
                 holdings.append({"symbol": sym, "value": mv, "asset_class": ac})
         return holdings

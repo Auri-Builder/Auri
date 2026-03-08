@@ -195,8 +195,8 @@ def main() -> None:
     _steps = [
         (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",          "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",         "pages/wizard.py",          "Configure in Upload Wizard →"),
-        (_ret_path.exists(),      "Retirement profile entered",     "pages/6_Retirement.py",    "Retirement Planner →"),
-        (_wealth_path.exists(),   "Wealth Builder profile entered", "pages/7_WealthBuilder.py", "Wealth Builder →"),
+        (_ret_path.exists(),      "Retirement profile entered",     "pages/7_Retirement.py",    "Retirement Planner →"),
+        (_wealth_path.exists(),   "Wealth Builder profile entered", "pages/6_WealthBuilder.py", "Wealth Builder →"),
     ]
     _incomplete = [s for s in _steps if not s[0]]
     if _incomplete:
@@ -284,7 +284,7 @@ def main() -> None:
                 st.info("No retirement profile yet.")
 
             st.divider()
-            st.page_link("pages/6_Retirement.py", label="Retirement Planner →")
+            st.page_link("pages/7_Retirement.py", label="Retirement Planner →")
 
     # ── Card 3: Wealth Builder ────────────────────────────────────────────
     with card3:
@@ -303,7 +303,7 @@ def main() -> None:
             else:
                 st.info("No profile yet — get started below.")
             st.divider()
-            st.page_link("pages/7_WealthBuilder.py", label="Wealth Builder →")
+            st.page_link("pages/6_WealthBuilder.py", label="Wealth Builder →")
 
     st.divider()
 
