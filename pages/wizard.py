@@ -243,28 +243,44 @@ for uf in uploaded_files:
                 st.rerun()
 
     else:
-        # NEW ACCOUNT PATH
-        with st.form(key=f"form_{safe_name}"):
-            col1, col2 = st.columns(2)
-            with col1:
-                account_type = st.selectbox(
-                    "Account type",
-                    options=ACCOUNT_TYPE_OPTIONS,
-                    index=0,
-                )
-                institution = st.text_input("Institution", value="TD Wealth")
-            with col2:
-                account_id_input = st.text_input(
-                    "Account ID",
-                    value=detected_id,
-                    help="Auto-detected from filename where possible.",
-                )
-                label = st.text_input("Label", placeholder="e.g. Child Name RESP (optional)")
-            currency = st.selectbox("Currency", options=CURRENCY_OPTIONS, index=0)
+        # NEW ACCOUNT PATH — one required field, everything else auto-detected
+        st.markdown("**New account — select account type to save:**")
 
-            submitted = st.form_submit_button("Save to accounts.yaml")
+        # Try to guess account type from account ID pattern or name
+        _id_upper = detected_id.upper()
+        _guess_type = "RRSP"  # safe default for TD WebBroker
+        if _id_upper.endswith("J"):
+            _guess_type = "TFSA"
+        elif _id_upper.endswith("S"):
+            _guess_type = "RRSP"
+        elif _id_upper.endswith("A") or _id_upper.endswith("B"):
+            _guess_type = "CASH"
 
-        if submitted:
+        _type_idx = ACCOUNT_TYPE_OPTIONS.index(_guess_type) if _guess_type in ACCOUNT_TYPE_OPTIONS else 0
+
+        _tc1, _tc2 = st.columns([2, 1])
+        account_type = _tc1.selectbox(
+            "Account type",
+            options=ACCOUNT_TYPE_OPTIONS,
+            index=_type_idx,
+            key=f"actype_{safe_name}",
+            help="RRSP, TFSA, CASH (non-registered), RESP, etc."
+        )
+        label = _tc2.text_input(
+            "Label (optional)",
+            placeholder="e.g. Jeff TFSA",
+            key=f"label_{safe_name}",
+        )
+
+        with st.expander("Advanced (auto-detected — change only if wrong)"):
+            _ac1, _ac2, _ac3 = st.columns(3)
+            institution     = _ac1.text_input("Institution", value="TD Wealth",  key=f"inst_{safe_name}")
+            account_id_input = _ac2.text_input("Account ID",  value=detected_id, key=f"acid_{safe_name}",
+                                               help="Auto-detected from filename.")
+            currency        = _ac3.selectbox("Currency", CURRENCY_OPTIONS, index=0, key=f"cur_{safe_name}")
+
+        if st.button(f"Save — {account_type}" + (f" · {label}" if label else ""),
+                     type="primary", key=f"save_{safe_name}"):
             tmp_path = v.get("tmp_path")
             if not tmp_path or not Path(tmp_path).exists():
                 st.error("Temp file missing — please re-upload the file.")
@@ -286,10 +302,10 @@ for uf in uploaded_files:
                 st.session_state.saved.add(uf.name)
                 total_now = len(_load_accounts())
                 st.success(
-                    f"Saved: {safe_name}. "
-                    f"{total_now} account(s) now configured in accounts.yaml."
+                    f"Saved: {safe_name} as {account_type}. "
+                    f"{total_now} account(s) now configured."
                 )
-                st.page_link("pages/1_Portfolio.py", label="Go to Portfolio and click Refresh")
+                st.page_link("pages/1_Portfolio.py", label="Go to Portfolio and click Refresh →")
                 st.rerun()
 
 # ── Personal Profile ───────────────────────────────────────────────────────

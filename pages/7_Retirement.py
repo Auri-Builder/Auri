@@ -1127,10 +1127,42 @@ def main():
     sp_oas_start_age = int(spouse_d.get("oas_start_age", 0)) if spouse_d else 0
     auto_tfsa             = bool(profile.get("preferences", {}).get("auto_tfsa_routing", True))
     voluntary_topup       = float(spending.get("voluntary_tfsa_topup", 0.0))
-    slow_go_age           = int(spending.get("slow_go_age", 0))
-    slow_go_reduction_pct = float(spending.get("slow_go_reduction_pct", 15.0))
-    no_go_age             = int(spending.get("no_go_age", 0))
-    no_go_reduction_pct   = float(spending.get("no_go_reduction_pct", 25.0))
+
+    # ── Spending phases — adjustable in sidebar without re-submitting form ──
+    _base_spending        = float(spending.get("annual_target", 80_000))
+    _sg_age_saved         = int(spending.get("slow_go_age", 0))
+    _sg_red_saved         = float(spending.get("slow_go_reduction_pct", 15.0))
+    _ng_age_saved         = int(spending.get("no_go_age", 0))
+    _ng_red_saved         = float(spending.get("no_go_reduction_pct", 25.0))
+
+    with st.sidebar:
+        st.divider()
+        st.markdown("**Spending Phases**")
+        st.caption("Adjust and see results update instantly.")
+        _sg_on  = st.toggle("Slow-Go phase", value=(_sg_age_saved > 0), key="rt_sg_on")
+        if _sg_on:
+            slow_go_age           = st.slider("Slow-Go starts at age", 60, 85,
+                                               value=_sg_age_saved if _sg_age_saved > 0 else 70,
+                                               step=1, key="rt_sg_age")
+            slow_go_reduction_pct = st.slider("Spending reduction (%)", 5, 40,
+                                               value=int(_sg_red_saved), step=5, key="rt_sg_red")
+            st.caption(f"→ ${_base_spending * (1 - slow_go_reduction_pct/100):,.0f}/yr from age {slow_go_age}")
+        else:
+            slow_go_age           = 0
+            slow_go_reduction_pct = 15.0
+
+        _ng_on  = st.toggle("No-Go phase", value=(_ng_age_saved > 0), key="rt_ng_on")
+        if _ng_on:
+            no_go_age             = st.slider("No-Go starts at age", 70, 90,
+                                               value=_ng_age_saved if _ng_age_saved > 0 else 80,
+                                               step=1, key="rt_ng_age")
+            no_go_reduction_pct   = st.slider("Additional reduction (%)", 5, 40,
+                                               value=int(_ng_red_saved), step=5, key="rt_ng_red")
+            _sg_factor = (1 - slow_go_reduction_pct/100) if _sg_on else 1.0
+            st.caption(f"→ ${_base_spending * _sg_factor * (1 - no_go_reduction_pct/100):,.0f}/yr from age {no_go_age}")
+        else:
+            no_go_age             = 0
+            no_go_reduction_pct   = 25.0
 
     with st.spinner("Running projections..."):
         try:
