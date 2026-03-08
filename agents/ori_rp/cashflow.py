@@ -123,6 +123,15 @@ class ScenarioParams:
     # When True, RRIF minimum excess in retirement is sheltered in TFSA (up to room) before non_reg
     auto_tfsa_routing: bool = True
 
+    # Spending phase step-downs (go-go / slow-go / no-go)
+    # slow_go_age: age at which spending drops by slow_go_reduction_pct (default 70, 15%)
+    # no_go_age:   age at which spending drops further by no_go_reduction_pct (default 80, 25%)
+    # Set either reduction to 0.0 to disable that phase.
+    slow_go_age:           int   = 0     # 0 = disabled
+    slow_go_reduction_pct: float = 15.0  # % reduction from base at slow_go_age
+    no_go_age:             int   = 0     # 0 = disabled
+    no_go_reduction_pct:   float = 25.0  # % reduction from base at no_go_age
+
 
 @dataclass
 class PersonProfile:
@@ -274,7 +283,12 @@ def project_scenario(
                 sp_tfsa_room += _annual_tfsa_limit(current_year)
 
         if in_retirement:
-            spending_target = params.target_annual_spending * inflation_factor
+            _phase_factor = 1.0
+            if params.slow_go_age > 0 and age_primary >= params.slow_go_age:
+                _phase_factor *= (1.0 - params.slow_go_reduction_pct / 100.0)
+            if params.no_go_age > 0 and age_primary >= params.no_go_age:
+                _phase_factor *= (1.0 - params.no_go_reduction_pct / 100.0)
+            spending_target = params.target_annual_spending * inflation_factor * _phase_factor
             large_exp       = lump_by_yr.get(current_year, 0.0) * inflation_factor
             # Voluntary TFSA top-up is an additional annual draw (sheltered immediately in TFSA).
             # It is inflation-adjusted and added to the withdrawal need, then credited back

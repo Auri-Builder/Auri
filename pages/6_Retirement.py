@@ -134,6 +134,8 @@ def _run_scenarios(
     sp_cpp_start_age=0, sp_oas_start_age=0,
     auto_tfsa_routing=True,
     voluntary_tfsa_topup=0.0,
+    slow_go_age=0, slow_go_reduction_pct=15.0,
+    no_go_age=0,  no_go_reduction_pct=25.0,
 ):
     from agents.ori_rp.cashflow import ScenarioParams, project_scenario, scenario_to_dict, scenario_summary
     from agents.ori_rp.withdrawal import WithdrawalStrategy
@@ -172,6 +174,10 @@ def _run_scenarios(
         sp_cpp_start_age=sp_cpp_start_age,
         sp_oas_start_age=sp_oas_start_age,
         auto_tfsa_routing=auto_tfsa_routing,
+        slow_go_age=slow_go_age,
+        slow_go_reduction_pct=slow_go_reduction_pct,
+        no_go_age=no_go_age,
+        no_go_reduction_pct=no_go_reduction_pct,
     )
 
     scenarios_raw = [
@@ -360,7 +366,7 @@ def _portfolio_chart(scenario_runs):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _income_waterfall_chart(rows, scenario_name: str):
+def _income_waterfall_chart(rows, scenario_name: str, sc=None):
     """Stacked bar: CPP | OAS | Pension | Part-time | Portfolio withdrawal per year."""
     if not _PLOTLY:
         return
@@ -376,6 +382,36 @@ def _income_waterfall_chart(rows, scenario_name: str):
     target    = [r.spending_target         for r in rows]
 
     fig = go.Figure()
+
+    # ── Spending phase bands ───────────────────────────────────────────────
+    if sc and ages:
+        age_min, age_max = ages[0], ages[-1]
+        slow_go = getattr(sc, "slow_go_age", 0)
+        no_go   = getattr(sc, "no_go_age", 0)
+
+        # Go-Go band (retirement start → slow-go or end)
+        go_go_end = slow_go if slow_go > age_min else (no_go if no_go > age_min else age_max)
+        if go_go_end > age_min:
+            fig.add_vrect(x0=age_min, x1=go_go_end,
+                          fillcolor="#DCFCE7", opacity=0.25, layer="below", line_width=0,
+                          annotation_text="Go-Go", annotation_position="top left",
+                          annotation_font_size=11, annotation_font_color="#15803D")
+
+        # Slow-Go band
+        if slow_go > age_min:
+            slow_go_end = no_go if (no_go > slow_go) else age_max
+            fig.add_vrect(x0=slow_go, x1=slow_go_end,
+                          fillcolor="#FEF9C3", opacity=0.30, layer="below", line_width=0,
+                          annotation_text="Slow-Go", annotation_position="top left",
+                          annotation_font_size=11, annotation_font_color="#92400E")
+
+        # No-Go band
+        if no_go > age_min:
+            fig.add_vrect(x0=no_go, x1=age_max,
+                          fillcolor="#FEE2E2", opacity=0.25, layer="below", line_width=0,
+                          annotation_text="No-Go", annotation_position="top left",
+                          annotation_font_size=11, annotation_font_color="#991B1B")
+
     for label, data, colour in [
         ("CPP",            cpp,       "#2563EB"),
         ("OAS",            oas,       "#7C3AED"),
@@ -409,21 +445,21 @@ def _income_waterfall_chart(rows, scenario_name: str):
         yaxis_title="Annual Income ($)",
         yaxis_tickformat="$,.0f",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=380,
+        height=400,
         margin=dict(l=0, r=0, t=60, b=0),
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _account_balance_chart(rows, scenario_name: str):
+def _account_balance_chart(rows, scenario_name: str, sc=None):
     """Stacked area: RRSP/RRIF, TFSA, Non-Reg balances over time."""
     if not _PLOTLY:
         return
 
-    ages    = [r.age_primary     for r in rows]
+    ages    = [r.age_primary       for r in rows]
     rrif    = [r.rrsp_rrif_balance for r in rows]
-    tfsa    = [r.tfsa_balance    for r in rows]
-    non_reg = [r.non_reg_balance for r in rows]
+    tfsa    = [r.tfsa_balance      for r in rows]
+    non_reg = [r.non_reg_balance   for r in rows]
 
     fig = go.Figure()
     for label, data, colour in [
@@ -440,6 +476,23 @@ def _account_balance_chart(rows, scenario_name: str):
             hovertemplate=f"<b>{label}</b><br>$%{{y:,.0f}}<extra></extra>",
         ))
 
+    # ── Milestone lines ────────────────────────────────────────────────────
+    if sc and ages:
+        age_min, age_max = ages[0], ages[-1]
+        milestones = []
+        if age_min <= 71 <= age_max:
+            milestones.append((71, "#6B7280", "RRIF conversion"))
+        cpp_age = getattr(sc, "cpp_start_age", 0)
+        if cpp_age and age_min <= cpp_age <= age_max:
+            milestones.append((cpp_age, "#2563EB", f"CPP starts ({cpp_age})"))
+        oas_age = getattr(sc, "oas_start_age", 0)
+        if oas_age and age_min <= oas_age <= age_max and oas_age != cpp_age:
+            milestones.append((oas_age, "#7C3AED", f"OAS starts ({oas_age})"))
+        for age, colour, label in milestones:
+            fig.add_vline(x=age, line=dict(color=colour, dash="dash", width=1.5),
+                          annotation_text=label, annotation_position="top right",
+                          annotation_font_size=10, annotation_font_color=colour)
+
     fig.update_layout(
         hovermode="x unified",
         title=f"Account Balances by Type — {scenario_name}",
@@ -447,20 +500,20 @@ def _account_balance_chart(rows, scenario_name: str):
         yaxis_title="Balance ($)",
         yaxis_tickformat="$,.0f",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=360,
+        height=380,
         margin=dict(l=0, r=0, t=60, b=0),
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _tax_timeline_chart(rows, scenario_name: str):
+def _tax_timeline_chart(rows, scenario_name: str, sc=None):
     """Annual estimated tax burden over retirement."""
     if not _PLOTLY:
         return
 
-    ages  = [r.age_primary      for r in rows]
-    taxes = [r.taxes_estimated  for r in rows]
-    clbk  = [r.oas_clawback     for r in rows]
+    ages  = [r.age_primary     for r in rows]
+    taxes = [r.taxes_estimated for r in rows]
+    clbk  = [r.oas_clawback    for r in rows]
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -478,13 +531,35 @@ def _tax_timeline_chart(rows, scenario_name: str):
             hovertemplate="<b>OAS Clawback</b><br>Age %{x}<br>$%{y:,.0f}<extra></extra>",
         ))
 
+    # ── OAS clawback threshold line ────────────────────────────────────────
+    # Threshold kicks in at ~$93,454 net income (2026); tax on excess = 15%
+    # As a guide, show what $93k income would cost in tax — rough horizontal marker
+    # More useful: show the CPP/OAS start age as a vertical so viewer can see
+    # when tax jumps as government income begins.
+    if sc and ages:
+        age_min, age_max = ages[0], ages[-1]
+        cpp_age = getattr(sc, "cpp_start_age", 0)
+        oas_age = getattr(sc, "oas_start_age", 0)
+        if cpp_age and age_min <= cpp_age <= age_max:
+            fig.add_vline(x=cpp_age, line=dict(color="#2563EB", dash="dash", width=1.5),
+                          annotation_text=f"CPP starts", annotation_position="top right",
+                          annotation_font_size=10, annotation_font_color="#2563EB")
+        if oas_age and age_min <= oas_age <= age_max and oas_age != cpp_age:
+            fig.add_vline(x=oas_age, line=dict(color="#7C3AED", dash="dash", width=1.5),
+                          annotation_text=f"OAS starts", annotation_position="top right",
+                          annotation_font_size=10, annotation_font_color="#7C3AED")
+        if age_min <= 71 <= age_max:
+            fig.add_vline(x=71, line=dict(color="#6B7280", dash="dot", width=1.2),
+                          annotation_text="RRIF mandatory min", annotation_position="top left",
+                          annotation_font_size=10, annotation_font_color="#6B7280")
+
     fig.update_layout(
         hovermode="x unified",
         title=f"Estimated Tax Burden — {scenario_name}",
         xaxis_title="Age",
         yaxis_title="Taxes ($)",
         yaxis_tickformat="$,.0f",
-        height=320,
+        height=340,
         margin=dict(l=0, r=0, t=60, b=0),
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -819,6 +894,28 @@ def _profile_form() -> dict | None:
         inflation    = s3.number_input("Inflation Rate (%)", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
 
         # ── Large expenditures ─────────────────────────────────────────────
+        st.markdown("**Spending Phases** *(optional)*")
+        st.caption(
+            "Spending typically declines in later retirement as travel and activity slow. "
+            "Enter 0 for an age to disable that phase."
+        )
+        _sp1, _sp2, _sp3, _sp4 = st.columns(4)
+        slow_go_age_inp  = _sp1.number_input("Slow-Go Start Age",        min_value=0, max_value=95, value=70, step=1,
+                                              key="slow_go_age", help="Age spending steps down (typically 70). Set 0 to disable.")
+        slow_go_red_inp  = _sp2.number_input("Slow-Go Reduction (%)",    min_value=0.0, max_value=50.0, value=15.0, step=1.0,
+                                              key="slow_go_red", help="% reduction from base spending at Slow-Go age (e.g. 15 = spend 15% less).")
+        no_go_age_inp    = _sp3.number_input("No-Go Start Age",          min_value=0, max_value=95, value=80, step=1,
+                                              key="no_go_age", help="Age spending steps down further (typically 80). Set 0 to disable.")
+        no_go_red_inp    = _sp4.number_input("No-Go Additional Reduction (%)", min_value=0.0, max_value=50.0, value=25.0, step=1.0,
+                                              key="no_go_red", help="Additional % reduction at No-Go age (stacks on Slow-Go).")
+        if slow_go_age_inp > 0 or no_go_age_inp > 0:
+            _ex_spend = float(spending.get("annual_target", 80_000) if False else 0) # preview only in profile context
+            st.caption(
+                f"Example on $80,000 base: "
+                + (f"${80_000 * (1 - slow_go_red_inp/100):,.0f}/yr from age {slow_go_age_inp}  " if slow_go_age_inp > 0 else "")
+                + (f"→ ${80_000 * (1 - slow_go_red_inp/100) * (1 - no_go_red_inp/100):,.0f}/yr from age {no_go_age_inp}" if no_go_age_inp > 0 else "")
+            )
+
         st.markdown("**One-Time Large Expenditures** *(optional)*")
         st.caption(
             "Enter planned large expenses (car purchase, home renovation, travel, etc.). "
@@ -930,6 +1027,10 @@ def _profile_form() -> dict | None:
             "voluntary_tfsa_topup": tfsa_topup,
             "inflation_rate_pct":   inflation,
             "large_expenditures":   large_expenditures,
+            "slow_go_age":           int(slow_go_age_inp),
+            "slow_go_reduction_pct": float(slow_go_red_inp),
+            "no_go_age":             int(no_go_age_inp),
+            "no_go_reduction_pct":   float(no_go_red_inp),
         },
     }
     if spouse_data:
@@ -995,8 +1096,12 @@ def main():
     oas_start_age    = int(primary_d.get("oas_start_age", 65))
     sp_cpp_start_age = int(spouse_d.get("cpp_start_age", 0)) if spouse_d else 0
     sp_oas_start_age = int(spouse_d.get("oas_start_age", 0)) if spouse_d else 0
-    auto_tfsa        = bool(profile.get("preferences", {}).get("auto_tfsa_routing", True))
-    voluntary_topup  = float(spending.get("voluntary_tfsa_topup", 0.0))
+    auto_tfsa             = bool(profile.get("preferences", {}).get("auto_tfsa_routing", True))
+    voluntary_topup       = float(spending.get("voluntary_tfsa_topup", 0.0))
+    slow_go_age           = int(spending.get("slow_go_age", 0))
+    slow_go_reduction_pct = float(spending.get("slow_go_reduction_pct", 15.0))
+    no_go_age             = int(spending.get("no_go_age", 0))
+    no_go_reduction_pct   = float(spending.get("no_go_reduction_pct", 25.0))
 
     with st.spinner("Running projections..."):
         try:
@@ -1009,6 +1114,10 @@ def main():
                 sp_oas_start_age=sp_oas_start_age,
                 auto_tfsa_routing=auto_tfsa,
                 voluntary_tfsa_topup=voluntary_topup,
+                slow_go_age=slow_go_age,
+                slow_go_reduction_pct=slow_go_reduction_pct,
+                no_go_age=no_go_age,
+                no_go_reduction_pct=no_go_reduction_pct,
             )
         except Exception as exc:
             st.error(f"Projection error: {exc}")
@@ -1126,11 +1235,11 @@ def main():
         ["Income Waterfall", "Account Balances", "Tax Burden"]
     )
     with tab_waterfall:
-        _income_waterfall_chart(chosen_rows, chosen)
+        _income_waterfall_chart(chosen_rows, chosen, sc=chosen_sc)
     with tab_accounts:
-        _account_balance_chart(chosen_rows, chosen)
+        _account_balance_chart(chosen_rows, chosen, sc=chosen_sc)
     with tab_taxes:
-        _tax_timeline_chart(chosen_rows, chosen)
+        _tax_timeline_chart(chosen_rows, chosen, sc=chosen_sc)
 
     with st.expander("Year-by-Year Cashflow Detail", expanded=False):
         import pandas as pd
