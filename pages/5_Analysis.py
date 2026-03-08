@@ -4,6 +4,10 @@ Auri Analysis — pages/5_Analysis.py
 Portfolio commentary, target allocation, concentration alerts, and policy compliance.
 """
 
+import json
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -289,9 +293,22 @@ def _scenario_stress_test(summary: dict) -> None:
     )
 
 
+def _breadcrumb(current: str) -> None:
+    pages = [
+        ("Hub",           "Home.py"),
+        ("Portfolio",     "pages/1_Portfolio.py"),
+        ("Analysis",      None),
+        ("Wealth Builder","pages/6_WealthBuilder.py"),
+        ("Retirement",    "pages/7_Retirement.py"),
+    ]
+    parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
+    st.caption("  ›  ".join(parts))
+
+
 def main() -> None:
     st.set_page_config(page_title="Auri — Analysis", layout="wide")
     st.title("Portfolio Analysis")
+    _breadcrumb("Analysis")
 
     if st.button("Refresh"):
         load_summary.clear()
@@ -310,15 +327,28 @@ def main() -> None:
     st.subheader("Portfolio Commentary")
 
     _c1, _c2, _c3 = st.columns([1, 1, 5])
+    def _save_commentary(result: dict) -> None:
+        """Persist commentary to data/derived/ so the report builder can include it."""
+        try:
+            out = Path(__file__).resolve().parent.parent / "data" / "derived" / "commentary_latest.json"
+            result_to_save = {**result, "saved_at": datetime.now().isoformat()}
+            out.write_text(json.dumps(result_to_save, ensure_ascii=False, indent=2))
+        except Exception:
+            pass  # non-fatal
+
     with _c1:
         if st.button("Generate Commentary", help="Observations and clarifying questions about the current portfolio"):
             with st.spinner("Generating commentary — this may take up to a minute…"):
-                st.session_state["commentary"] = generate_commentary(mode="standard")
+                _r = generate_commentary(mode="standard")
+                st.session_state["commentary"] = _r
+                _save_commentary(_r)
     with _c2:
         if st.button("Challenge my portfolio", type="primary",
                      help="Adversarial second opinion: risks, allocation challenges, contrarian thesis"):
             with st.spinner("Generating challenge analysis — this may take up to a minute…"):
-                st.session_state["commentary"] = generate_commentary(mode="challenge")
+                _r = generate_commentary(mode="challenge")
+                st.session_state["commentary"] = _r
+                _save_commentary(_r)
     with _c3:
         if st.session_state.get("commentary") and st.button("Clear"):
             st.session_state.pop("commentary", None)

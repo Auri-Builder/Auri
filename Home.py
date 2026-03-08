@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 st.set_page_config(
     page_title="Auri — Financial Intelligence",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -64,6 +64,19 @@ def _portfolio_status() -> dict:
         return summary
     except Exception:
         return {}
+
+
+def _has_risk_profile() -> bool:
+    """Return True if the investor questionnaire has been scored."""
+    profile_path = PROJECT_ROOT / "data" / "portfolio" / "profile.yaml"
+    if not profile_path.exists():
+        return False
+    try:
+        import yaml  # noqa: PLC0415
+        prof = yaml.safe_load(profile_path.read_text()) or {}
+        return (prof.get("derived") or {}).get("risk_score") is not None
+    except Exception:
+        return False
 
 
 def _retirement_status() -> dict:
@@ -132,14 +145,14 @@ def _retirement_status() -> dict:
 
 
 def _wealth_status() -> dict:
-    """Read wealth builder profile if available."""
+    """Read wealth builder profile + run quick FI projection if data available."""
     profile_path = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
     if not profile_path.exists():
         return {}
     try:
         import yaml
-        wp  = yaml.safe_load(profile_path.read_text()) or {}
-        fin = wp.get("financials", {})
+        wp   = yaml.safe_load(profile_path.read_text()) or {}
+        fin  = wp.get("financials", {})
         pref = wp.get("preferences", {})
         nw   = wp.get("net_worth", {})
 
@@ -153,13 +166,47 @@ def _wealth_status() -> dict:
         total_liab   = sum(float(l.get("balance", 0)) for l in nw.get("liabilities", []))
         net_worth    = total_assets - total_liab if total_assets else None
 
+        # Quick FI projection using saved profile values
+        fi_age = None
+        shortfall = None
+        balance_at_target = None
+        fi_number_at_target = None
+        try:
+            from core.shared_profile import get_account_balances          # noqa: PLC0415
+            from agents.ori_wb.projector import ProjectorInput, project    # noqa: PLC0415
+            _acct      = get_account_balances()
+            _portfolio = sum(_acct.values()) if _acct else 0.0
+            _income    = float(fin.get("gross_income", 0))
+            _sav_rate  = float(fin.get("savings_rate_pct", 20.0))
+            if _income > 0 and current_age < ret_age:
+                _proj = project(ProjectorInput(
+                    current_age           = current_age,
+                    current_savings       = _portfolio,
+                    annual_income         = _income,
+                    savings_rate_pct      = _sav_rate,
+                    expected_return_pct   = float(fin.get("growth_rate_pct", 6.0)),
+                    inflation_pct         = float(fin.get("inflation_pct", 2.5)),
+                    target_retirement_age = ret_age,
+                ))
+                fi_age              = _proj.fi_age
+                shortfall           = _proj.shortfall_at_target
+                balance_at_target   = _proj.balance_at_target
+                fi_number_at_target = _proj.fi_number_at_target
+        except Exception:
+            pass
+
         return {
-            "current_age":    current_age,
-            "ret_age":        ret_age,
-            "yrs_to_ret":     ret_age - current_age,
-            "risk":           pref.get("risk_tolerance", "moderate").capitalize(),
-            "net_worth":      net_worth,
-            "province":       pref.get("province", ""),
+            "current_age":        current_age,
+            "ret_age":            ret_age,
+            "yrs_to_ret":         ret_age - current_age,
+            "risk":               pref.get("risk_tolerance", "moderate").capitalize(),
+            "net_worth":          net_worth,
+            "province":           pref.get("province", ""),
+            "fi_age":             fi_age,
+            "shortfall":          shortfall,
+            "balance_at_target":  balance_at_target,
+            "fi_number":          fi_number_at_target,
+            "savings_rate":       float(fin.get("savings_rate_pct", 0)),
         }
     except Exception:
         return {}
@@ -175,6 +222,133 @@ def _ai_status() -> str:
         return cfg.get("ai_provider", "").capitalize()
     except Exception:
         return ""
+
+
+# ── Report builder ────────────────────────────────────────────────────────────
+
+def _build_brief_html(
+    portfolio: dict,
+    wealth: dict,
+    retirement: dict,
+    commentary_path: Path,
+) -> str:
+    """Build a self-contained HTML financial brief for printing / sharing."""
+    import json as _json
+    from datetime import date as _date
+
+    today = _date.today().strftime("%B %d, %Y")
+
+    # ── Commentary ────────────────────────────────────────────────────────
+    commentary_html = ""
+    if commentary_path.exists():
+        try:
+            _c = _json.loads(commentary_path.read_text())
+            _mode = "Challenge Analysis" if _c.get("mode") == "challenge" else "AI Commentary"
+            _saved = _c.get("saved_at", "")[:10]
+            _text  = _c.get("commentary", "").replace("<", "&lt;").replace(">", "&gt;")
+            # Convert basic markdown bold/italic to HTML
+            import re
+            _text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", _text)
+            _text = re.sub(r"\*(.+?)\*",     r"<em>\1</em>",         _text)
+            _text = _text.replace("\n\n", "</p><p>").replace("\n", "<br>")
+            commentary_html = f"""
+            <h2>Portfolio {_mode}</h2>
+            <p class="meta">Generated {_saved} · Provider: {_c.get("provider_used","—")}</p>
+            <div class="commentary"><p>{_text}</p></div>"""
+        except Exception:
+            pass
+
+    # ── Portfolio section ─────────────────────────────────────────────────
+    port_rows = ""
+    for p in portfolio.get("positions_summary", [])[:20]:
+        sym = p.get("symbol", "—")
+        desc = p.get("description", "")[:40]
+        mv   = float(p.get("market_value") or 0)
+        acct = p.get("account_type", "")
+        port_rows += f"<tr><td>{sym}</td><td>{desc}</td><td>{acct}</td><td class='num'>{_fmt_cad(mv)}</td></tr>"
+
+    _sw = portfolio.get("sector_weights_pct", {})
+    sector_rows = "".join(
+        f"<tr><td>{s}</td><td class='num'>{w:.1f}%</td></tr>"
+        for s, w in sorted(_sw.items(), key=lambda x: -x[1])
+    )
+
+    # ── Wealth Builder section ─────────────────────────────────────────────
+    fi_line = ""
+    if wealth.get("fi_age"):
+        delta = wealth["fi_age"] - wealth["ret_age"]
+        fi_line = f"<tr><td>FI Age</td><td>{wealth['fi_age']} ({delta:+d} vs target {wealth['ret_age']})</td></tr>"
+    elif wealth.get("shortfall") and wealth["shortfall"] > 0:
+        fi_line = f"<tr><td>FI Age</td><td>Not reached by target · Shortfall {_fmt_cad(wealth['shortfall'])}</td></tr>"
+
+    nw_line = f"<tr><td>Net Worth</td><td>{_fmt_cad(wealth['net_worth'])}</td></tr>" if wealth.get("net_worth") else ""
+
+    # ── Retirement section ─────────────────────────────────────────────────
+    ret_section = ""
+    if retirement:
+        ret_section = f"""
+        <h2>Retirement Plan</h2>
+        <table>
+            <tr><td>Readiness Score</td><td>{retirement['score']:.0f} / 100 — {retirement['label']}</td></tr>
+            <tr><td>Retirement Assets</td><td>{_fmt_cad(retirement['portfolio'])}</td></tr>
+            <tr><td>Guaranteed Income</td><td>{_fmt_cad(retirement['guaranteed'])}/yr (CPP + OAS + pension)</td></tr>
+            {'<tr><td>Plan Type</td><td>Household (primary + spouse)</td></tr>' if retirement.get('has_spouse') else ''}
+        </table>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Auri Financial Brief — {today}</title>
+<style>
+  body {{ font-family: Georgia, serif; max-width: 860px; margin: 40px auto; padding: 0 24px; color: #1a1a1a; }}
+  h1   {{ font-size: 2em; margin-bottom: 4px; }}
+  h2   {{ font-size: 1.2em; margin-top: 32px; border-bottom: 1px solid #ccc; padding-bottom: 4px; color: #1e3a5f; }}
+  p.meta  {{ color: #666; font-size: 0.85em; margin: 0 0 12px; }}
+  table   {{ width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.92em; }}
+  td, th  {{ padding: 6px 10px; border-bottom: 1px solid #eee; vertical-align: top; }}
+  th      {{ background: #f0f4f8; font-weight: bold; text-align: left; }}
+  td.num  {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  .commentary {{ background: #f8f9fa; border-left: 3px solid #2563EB; padding: 12px 16px; font-size: 0.92em; line-height: 1.6; }}
+  .disclaimer {{ font-size: 0.78em; color: #888; margin-top: 40px; border-top: 1px solid #eee; padding-top: 12px; }}
+  @media print {{ body {{ margin: 20px; }} button {{ display: none; }} }}
+</style>
+</head>
+<body>
+<h1>Auri Financial Brief</h1>
+<p class="meta">Prepared {today} · Confidential — for planning discussion only</p>
+
+<h2>Portfolio Summary</h2>
+<table>
+  <tr><td>Total Value</td><td>{_fmt_cad(portfolio.get("total_market_value", 0))}</td></tr>
+  <tr><td>Positions</td><td>{portfolio.get("position_count", 0)}</td></tr>
+</table>
+{'<h3 style="margin-top:16px;font-size:1em;">Sector Weights</h3><table><tr><th>Sector</th><th class=num>Weight</th></tr>' + sector_rows + '</table>' if sector_rows else ''}
+{'<h3 style="margin-top:16px;font-size:1em;">Holdings</h3><table><tr><th>Symbol</th><th>Description</th><th>Account</th><th class=num>Market Value</th></tr>' + port_rows + '</table>' if port_rows else ''}
+
+<h2>Wealth Builder</h2>
+<table>
+  <tr><td>Current Age → Target Retirement</td><td>{wealth.get('current_age')} → {wealth.get('ret_age')}</td></tr>
+  <tr><td>Savings Rate</td><td>{wealth.get('savings_rate', 0):.0f}% of income</td></tr>
+  <tr><td>Risk Tolerance</td><td>{wealth.get('risk', '—')}</td></tr>
+  {fi_line}
+  {nw_line}
+</table>
+
+{ret_section}
+
+{commentary_html}
+
+<div class="disclaimer">
+  <strong>Disclaimer:</strong> All figures are estimates for planning and discussion purposes only.
+  Tax calculations use simplified marginal rates and do not account for all deductions, credits, or
+  personal circumstances. CPP and OAS projections are illustrative. Consult a registered financial
+  advisor (CFPTM, PFPTM) and tax professional before acting on any information in this brief.
+  Generated by Auri — local-first personal financial intelligence. Your data never leaves your machine.
+</div>
+</body>
+</html>"""
+    return html
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -197,8 +371,8 @@ def main() -> None:
         (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",          "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",         "pages/wizard.py",          "Configure in Upload Wizard →"),
         (_shared_path.exists(),   "Personal profile set up",        "pages/wizard.py",          "Set up in Wizard →"),
-        (_ret_path.exists(),      "Retirement profile entered",     "pages/7_Retirement.py",    "Retirement Planner →"),
         (_wealth_path.exists(),   "Wealth Builder profile entered", "pages/6_WealthBuilder.py", "Wealth Builder →"),
+        (_ret_path.exists(),      "Retirement profile entered",     "pages/7_Retirement.py",    "Retirement Planner →"),
     ]
     _incomplete = [s for s in _steps if not s[0]]
     if _incomplete:
@@ -221,6 +395,70 @@ def main() -> None:
     portfolio = _portfolio_status()
     retirement = _retirement_status()
     wealth = _wealth_status()
+    has_risk = _has_risk_profile()
+
+    # ── Financial Snapshot ────────────────────────────────────────────────
+    _has_portfolio = bool(portfolio)
+    _has_wealth    = bool(wealth)
+    _has_retirement = bool(retirement)
+
+    if _has_portfolio or _has_wealth or _has_retirement:
+        st.subheader("Financial Snapshot")
+        _snap_cols = st.columns(3)
+
+        with _snap_cols[0]:
+            st.caption("**Portfolio**")
+            if _has_portfolio:
+                _tmv = portfolio.get("total_market_value", 0)
+                _pr  = st.session_state.get("price_data")
+                if _pr and not _pr.get("error") and _pr.get("price_data"):
+                    _live = sum(
+                        ((_pr["price_data"].get(str(p.get("symbol","")).upper(), {}).get("price") or 0)
+                         * float(p.get("quantity") or 0))
+                        or float(p.get("market_value") or 0)
+                        for p in portfolio.get("positions_summary", [])
+                    )
+                    if _live > 0:
+                        _tmv = _live
+                st.markdown(f"**{_fmt_cad(_tmv)}** · {portfolio.get('position_count', 0)} positions")
+                _sw = portfolio.get("sector_weights_pct", {})
+                if _sw:
+                    _top = max(_sw, key=_sw.get)
+                    st.caption(f"Largest sector: {_top} ({_sw[_top]:.1f}%)")
+            else:
+                st.caption("No portfolio loaded")
+
+        with _snap_cols[1]:
+            st.caption("**Wealth Builder**")
+            if _has_wealth:
+                _fi_age   = wealth.get("fi_age")
+                _shortfall = wealth.get("shortfall")
+                _ret_age  = wealth.get("ret_age")
+                st.markdown(f"Age **{wealth['current_age']}** → target **{_ret_age}** · {wealth['savings_rate']:.0f}% savings")
+                if _fi_age:
+                    _delta = _fi_age - _ret_age
+                    _label = f"FI age **{_fi_age}** ({_delta:+d} vs target)"
+                    st.markdown(_label)
+                elif _shortfall and _shortfall > 0:
+                    st.markdown(f"FI age not reached · shortfall **{_fmt_cad(_shortfall)}**")
+                if wealth.get("net_worth") is not None:
+                    st.caption(f"Net worth: {_fmt_cad(wealth['net_worth'])}")
+            else:
+                st.caption("No Wealth Builder profile")
+
+        with _snap_cols[2]:
+            st.caption("**Retirement**")
+            if _has_retirement:
+                _score = retirement["score"]
+                _label = retirement["label"]
+                st.markdown(f"Readiness **{_score:.0f}/100** · {_label}")
+                st.caption(f"Guaranteed income: {_fmt_cad(retirement['guaranteed'])}/yr")
+                if retirement.get("has_spouse"):
+                    st.caption("Household projection")
+            else:
+                st.caption("No retirement profile yet")
+
+        st.divider()
 
     card1, card2, card3 = st.columns(3, gap="large")
 
@@ -261,12 +499,37 @@ def main() -> None:
                 st.info("No portfolio loaded yet.")
 
             st.divider()
-            c_dash, c_anal = st.columns(2)
-            c_dash.page_link("pages/1_Portfolio.py",  label="Dashboard →")
-            c_anal.page_link("pages/5_Analysis.py",   label="Analysis →")
+            if not portfolio:
+                st.page_link("pages/wizard.py", label="Upload Portfolio CSV →")
+            elif not has_risk:
+                st.warning("Complete your investor profile to unlock the dashboard.")
+                st.page_link("pages/profile.py", label="Investor Profile →")
+            else:
+                c_dash, c_anal = st.columns(2)
+                c_dash.page_link("pages/1_Portfolio.py",  label="Dashboard →")
+                c_anal.page_link("pages/5_Analysis.py",   label="Analysis →")
 
-    # ── Card 2: Retirement Planner ────────────────────────────────────────
+    # ── Card 2: Wealth Builder ────────────────────────────────────────────
     with card2:
+        with st.container(border=True):
+            st.markdown("### Wealth Builder")
+            st.caption("RRSP/TFSA optimizer · FI projector · allocation · net worth")
+            st.divider()
+            if wealth:
+                w1, w2 = st.columns(2)
+                w1.metric("Years to Retirement", wealth["yrs_to_ret"])
+                if wealth["net_worth"] is not None:
+                    w2.metric("Net Worth", _fmt_cad(wealth["net_worth"]))
+                else:
+                    w2.metric("Risk Tolerance", wealth["risk"])
+                st.caption(f"Age {wealth['current_age']} → {wealth['ret_age']} · {wealth['risk']} · {wealth['province']}")
+            else:
+                st.info("No profile yet — get started below.")
+            st.divider()
+            st.page_link("pages/6_WealthBuilder.py", label="Wealth Builder →")
+
+    # ── Card 3: Retirement Planner ────────────────────────────────────────
+    with card3:
         with st.container(border=True):
             st.markdown("### Retirement Planner")
             st.caption("Projections · Monte Carlo · CPP/OAS timing · tax efficiency")
@@ -288,24 +551,54 @@ def main() -> None:
             st.divider()
             st.page_link("pages/7_Retirement.py", label="Retirement Planner →")
 
-    # ── Card 3: Wealth Builder ────────────────────────────────────────────
-    with card3:
-        with st.container(border=True):
-            st.markdown("### Wealth Builder")
-            st.caption("RRSP/TFSA optimizer · FI projector · allocation · net worth")
-            st.divider()
-            if wealth:
-                w1, w2 = st.columns(2)
-                w1.metric("Years to Retirement", wealth["yrs_to_ret"])
-                if wealth["net_worth"] is not None:
-                    w2.metric("Net Worth", _fmt_cad(wealth["net_worth"]))
-                else:
-                    w2.metric("Risk Tolerance", wealth["risk"])
-                st.caption(f"Age {wealth['current_age']} → {wealth['ret_age']} · {wealth['risk']} · {wealth['province']}")
+    st.divider()
+
+    # ── Financial Brief ───────────────────────────────────────────────────
+    _brief_portfolio  = bool(portfolio)
+    _brief_wealth     = bool(wealth)
+    _brief_retirement = bool(retirement)
+    _brief_commentary_path = PROJECT_ROOT / "data" / "derived" / "commentary_latest.json"
+    _brief_commentary = _brief_commentary_path.exists()
+    _can_generate     = _brief_portfolio and _brief_wealth
+
+    with st.expander("Financial Brief — advisor-ready summary", expanded=False):
+        st.caption("Generate a one-page summary of your financial picture to share with your advisor.")
+
+        # Pre-flight checklist
+        _checks = [
+            (_brief_portfolio,   "Portfolio loaded",            "Upload CSV in Wizard →",       "pages/wizard.py"),
+            (_brief_wealth,      "Wealth Builder profile saved","Complete in Wealth Builder →",  "pages/6_WealthBuilder.py"),
+            (_brief_retirement,  "Retirement plan (optional)",  "Set up in Retirement Planner →","pages/7_Retirement.py"),
+            (_brief_commentary,  "AI commentary (optional)",    "Run in Analysis →",             "pages/5_Analysis.py"),
+        ]
+        for done, label, action, page in _checks:
+            icon = "✅" if done else "⬜"
+            if done:
+                st.markdown(f"{icon} {label}")
             else:
-                st.info("No profile yet — get started below.")
-            st.divider()
-            st.page_link("pages/6_WealthBuilder.py", label="Wealth Builder →")
+                _bc1, _bc2 = st.columns([4, 1])
+                _bc1.markdown(f"{icon} {label}")
+                _bc2.page_link(page, label=action)
+
+        st.divider()
+
+        if not _can_generate:
+            st.info("Load your portfolio CSV and save a Wealth Builder profile to generate the brief.")
+        else:
+            if st.button("Generate Financial Brief", type="primary", use_container_width=True):
+                _html = _build_brief_html(portfolio, wealth, retirement, _brief_commentary_path)
+                st.session_state["brief_html"] = _html
+
+        if st.session_state.get("brief_html"):
+            st.download_button(
+                label="Download Brief (HTML — open in browser to print as PDF)",
+                data=st.session_state["brief_html"],
+                file_name=f"auri-financial-brief-{date.today()}.html",
+                mime="text/html",
+                use_container_width=True,
+            )
+            with st.expander("Preview"):
+                st.components.v1.html(st.session_state["brief_html"], height=600, scrolling=True)
 
     st.divider()
 

@@ -78,11 +78,11 @@ def _tab_optimizer(profile: dict) -> None:
     _sp     = load_shared_profile().get("primary", {})
     _acct   = get_account_balances()
 
-    # Seed defaults: shared profile > WB profile > hardcoded fallback
+    # Seed defaults: shared profile > WB profile > 0 (force user to enter real numbers)
     _province_def = pref.get("province") or _sp.get("province", "BC")
-    _income_def   = int(fin.get("gross_income")  or _sp.get("gross_income",  95_000))
+    _income_def   = int(fin.get("gross_income")  or _sp.get("gross_income",  0))
     _yrs_def      = int(fin.get("years_to_retirement") or
-                        max(1, (_sp.get("target_retirement_age", 65) - _sp.get("current_age", 45))))
+                        max(1, (_sp.get("target_retirement_age", 65) - _sp.get("current_age", 35))))
 
     # RRSP/TFSA balances from CSV — shown as context, not as room (room ≠ balance)
     _rrsp_bal = _acct.get("RRSP", 0)
@@ -98,19 +98,19 @@ def _tab_optimizer(profile: dict) -> None:
         gross_income   = c1.number_input("Gross Annual Income ($)", min_value=0, max_value=1_000_000,
                                           value=_income_def, step=1_000)
         savings_amount = c2.number_input("Amount to Contribute This Year ($)", min_value=0, max_value=500_000,
-                                          value=int(fin.get("annual_savings", 15_000)), step=500)
+                                          value=int(fin.get("annual_savings", 0)), step=500)
         province       = c3.selectbox("Province", _provinces,
                                        index=_provinces.index(_province_def) if _province_def in _provinces else 0)
 
         c4, c5, c6 = st.columns(3)
         rrsp_room      = c4.number_input("RRSP Room Remaining ($)", min_value=0, max_value=500_000,
-                                          value=int(fin.get("rrsp_room", 50_000)), step=1_000,
+                                          value=int(fin.get("rrsp_room", 0)), step=1_000,
                                           help="From your CRA My Account or most recent NOA.")
         tfsa_room      = c5.number_input("TFSA Room Remaining ($)", min_value=0, max_value=200_000,
-                                          value=int(fin.get("tfsa_room", 30_000)), step=500,
+                                          value=int(fin.get("tfsa_room", 0)), step=500,
                                           help="Total unused TFSA contribution room.")
         ret_income     = c6.number_input("Expected Retirement Income ($)", min_value=0, max_value=500_000,
-                                          value=int(fin.get("expected_retirement_income", 55_000)), step=1_000,
+                                          value=int(fin.get("expected_retirement_income", 0)), step=1_000,
                                           help="Estimated gross income in retirement (CPP + OAS + RRIF withdrawals).")
 
         c7, c8 = st.columns(2)
@@ -139,6 +139,8 @@ def _tab_optimizer(profile: dict) -> None:
     result = optimise(inp)
 
     st.divider()
+    st.subheader("Optimisation Results")
+    st.caption(f"Based on ${gross_income:,.0f} income · {province} · {yrs_to_ret} years to retirement")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Recommended RRSP", _fmt(result.recommended_rrsp))
     m2.metric("Recommended TFSA", _fmt(result.recommended_tfsa))
@@ -162,11 +164,24 @@ def _tab_optimizer(profile: dict) -> None:
                    delta_color="inverse")
 
     with r2:
-        st.markdown(f"**Projected Value at Retirement ({yrs_to_ret} years)**")
+        g = (1 + float(growth_rate) / 100) ** int(yrs_to_ret)
+        rate_ret = result.marginal_rate_retirement
+        # Combine existing balances + this year's contribution for total projected value
+        total_rrsp_fv = (_rrsp_bal + result.recommended_rrsp) * g * (1 - rate_ret)
+        total_tfsa_fv = (_tfsa_bal + result.recommended_tfsa) * g
+
+        st.markdown(f"**Estimated Future Value in {yrs_to_ret} years**")
+        st.caption(f"What today's balances + this year's contributions grow to at {growth_rate}% return")
+        if _rrsp_bal or _tfsa_bal:
+            st.caption(f"Today: RRSP ${_rrsp_bal:,.0f} · TFSA ${_tfsa_bal:,.0f}")
         pv1, pv2 = st.columns(2)
-        pv1.metric("RRSP (after-tax withdrawal)", _fmt(result.rrsp_future_value),
-                   help="Gross RRSP value × (1 - estimated retirement marginal rate)")
-        pv2.metric("TFSA (tax-free)", _fmt(result.tfsa_future_value))
+        pv1.metric("RRSP (after-tax at withdrawal)", _fmt(total_rrsp_fv),
+                   help=f"Today's ${_rrsp_bal:,.0f} + this year's ${result.recommended_rrsp:,.0f} "
+                        f"grown at {growth_rate}% for {yrs_to_ret} years, "
+                        f"then taxed at estimated retirement rate ({rate_ret:.1%})")
+        pv2.metric("TFSA (withdrawn tax-free)", _fmt(total_tfsa_fv),
+                   help=f"Today's ${_tfsa_bal:,.0f} + this year's ${result.recommended_tfsa:,.0f} "
+                        f"grown at {growth_rate}% for {yrs_to_ret} years, tax-free withdrawal")
 
     if result.rrsp_capped_by_room:
         st.warning(f"RRSP room is the binding constraint at {_fmt(rrsp_room)}. Consider maximising TFSA with the remainder.")
@@ -206,7 +221,7 @@ def _tab_projector(profile: dict) -> None:
 
     # Pre-populate current savings from loaded portfolio if available
     _portfolio_mv = _get_portfolio_market_value()
-    _savings_default = int(fin.get("current_savings", _portfolio_mv or 150_000))
+    _savings_default = int(fin.get("current_savings", _portfolio_mv or 0))
     if _portfolio_mv:
         st.info(f"Current savings pre-populated from your portfolio CSV: **${_portfolio_mv:,.0f}**. Adjust if you have additional savings outside the portfolio (e.g. home equity, other accounts).")
 
@@ -256,6 +271,8 @@ def _tab_projector(profile: dict) -> None:
     result = project(inp)
 
     st.divider()
+    st.subheader("Projection Results")
+    st.caption(f"Age {int(current_age)} → {int(target_ret_age)} · {savings_rate:.0f}% savings rate · {expected_return:.1f}% return · {inflation:.1f}% inflation")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Nest Egg at Target Age", _fmt(result.balance_at_target))
     m2.metric("FI Number at Target Age", _fmt(result.fi_number_at_target))
@@ -629,14 +646,23 @@ def _tab_net_worth(profile: dict) -> None:
     saved_assets = saved_nw.get("assets", [])
     saved_liab   = saved_nw.get("liabilities", [])
 
+    # Pre-populate registered/non-reg from CSV if no saved balance sheet yet
+    from core.shared_profile import get_account_balances, non_registered_balance  # noqa: PLC0415
+    _acct_nw = get_account_balances()
+    _csv_rrsp = int(_acct_nw.get("RRSP", 0) + _acct_nw.get("RRIF", 0) + _acct_nw.get("LIRA", 0))
+    _csv_tfsa = int(_acct_nw.get("TFSA", 0))
+    _csv_non_reg = int(non_registered_balance())
+    if _csv_rrsp or _csv_tfsa or _csv_non_reg:
+        st.info(f"Registered accounts pre-filled from your portfolio CSV. Add real estate, vehicles, and debts below.")
+
     # ── Assets form ───────────────────────────────────────────────────────
     st.markdown("**Assets**")
     asset_definitions = [
-        # (label, category, default_value)
-        ("RRSP / RRIF",           "registered",  "rrsp_rrif",    0),
-        ("TFSA",                  "registered",  "tfsa",         0),
+        # (label, category, key, csv_default)
+        ("RRSP / RRIF",           "registered",  "rrsp_rrif",    _csv_rrsp),
+        ("TFSA",                  "registered",  "tfsa",         _csv_tfsa),
         ("Pension (commuted est.)", "registered","pension",      0),
-        ("Non-Reg Investments",   "non_reg",     "non_reg",      0),
+        ("Non-Reg Investments",   "non_reg",     "non_reg",      _csv_non_reg),
         ("Primary Residence",     "real_estate", "home",         0),
         ("Rental / Other Property","real_estate","rental",       0),
         ("Vehicles",              "vehicle",     "vehicles",     0),
@@ -647,10 +673,11 @@ def _tab_net_worth(profile: dict) -> None:
 
     asset_cols = st.columns(2)
     asset_inputs = []
-    for i, (label, cat, key, default) in enumerate(asset_definitions):
+    for i, (label, cat, key, csv_default) in enumerate(asset_definitions):
         col = asset_cols[i % 2]
+        # Saved balance sheet takes priority; fall back to CSV pre-fill, then 0
         val = col.number_input(label, min_value=0, max_value=10_000_000,
-                                value=int(_saved_map.get(key, default)), step=1_000,
+                                value=int(_saved_map.get(key, csv_default)), step=1_000,
                                 key=f"nw_asset_{key}")
         asset_inputs.append({"label": label, "category": cat, "key": key, "value": val})
 
@@ -808,15 +835,17 @@ def _profile_sidebar() -> dict:
             st.caption(f"Profile: {sp.get('name', 'Primary')} · age {sp.get('current_age', '?')}")
             st.page_link("pages/wizard.py", label="Edit profile in Wizard →")
         with st.expander("Quick Setup", expanded=not profile and not sp):
-            age      = st.number_input("Current Age", 18, 70, _age_default, key="sb_age")
-            ret_age  = st.number_input("Target Retirement Age", 40, 75, _ret_default, key="sb_ret")
-            income   = st.number_input("Gross Income ($)", 0, 1_000_000, _income_default, step=1_000, key="sb_income")
-            province = st.selectbox("Province", _provinces,
-                                     index=_provinces.index(_province_default) if _province_default in _provinces else 0,
-                                     key="sb_prov")
-            risk     = st.selectbox("Risk Tolerance", _risks,
-                                     index=_risks.index(_risk_default) if _risk_default in _risks else 1,
-                                     key="sb_risk")
+            _has_spouse_default = bool(pref.get("has_spouse", sp.get("has_spouse", False)))
+            age        = st.number_input("Current Age", 18, 70, _age_default, key="sb_age")
+            ret_age    = st.number_input("Target Retirement Age", 40, 75, _ret_default, key="sb_ret")
+            income     = st.number_input("Gross Income ($)", 0, 1_000_000, _income_default, step=1_000, key="sb_income")
+            province   = st.selectbox("Province", _provinces,
+                                       index=_provinces.index(_province_default) if _province_default in _provinces else 0,
+                                       key="sb_prov")
+            risk       = st.selectbox("Risk Tolerance", _risks,
+                                       index=_risks.index(_risk_default) if _risk_default in _risks else 1,
+                                       key="sb_risk")
+            has_spouse = st.checkbox("Has spouse / partner", value=_has_spouse_default, key="sb_spouse")
             if st.button("Save", use_container_width=True, key="sb_save"):
                 profile.setdefault("financials", {}).update({
                     "current_age":           int(age),
@@ -827,6 +856,7 @@ def _profile_sidebar() -> dict:
                 profile.setdefault("preferences", {}).update({
                     "province":       province,
                     "risk_tolerance": risk,
+                    "has_spouse":     has_spouse,
                 })
                 _save_profile(profile)
                 # Also push back to shared profile so Retirement picks it up
@@ -836,6 +866,7 @@ def _profile_sidebar() -> dict:
                     "province":              province,
                     "risk_tolerance":        risk,
                     "target_retirement_age": int(ret_age),
+                    "has_spouse":            has_spouse,
                 })
                 save_shared_profile(shared)
                 st.success("Saved.")
@@ -855,8 +886,21 @@ def _profile_sidebar() -> dict:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _breadcrumb(current: str) -> None:
+    pages = [
+        ("Hub",           "Home.py"),
+        ("Portfolio",     "pages/1_Portfolio.py"),
+        ("Analysis",      "pages/5_Analysis.py"),
+        ("Wealth Builder",None),
+        ("Retirement",    "pages/7_Retirement.py"),
+    ]
+    parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
+    st.caption("  ›  ".join(parts))
+
+
 def main() -> None:
     st.title("Wealth Builder")
+    _breadcrumb("Wealth Builder")
     st.caption("Accumulation-phase planning · RRSP/TFSA strategy · FI projections · net worth")
 
     profile = _profile_sidebar()

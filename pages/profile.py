@@ -171,24 +171,32 @@ def _fmt_score(v: float | None) -> str:
 st.set_page_config(page_title="Auri · Investor Profile", layout="wide")
 st.title("Investor Profile")
 
-missing = []
-if not PROFILE_PATH.exists():
-    missing.append("`data/portfolio/profile.yaml`")
-if not ANSWERS_PATH.exists():
-    missing.append("`data/portfolio/answers.yaml`")
-if missing:
-    st.warning(
-        f"Profile files not found: {', '.join(missing)}. "
-        "They will be created when you first save from this page."
-    )
+# Breadcrumb
+_crumb_pages = [("Hub","Home.py"),("Portfolio","pages/1_Portfolio.py"),("Investor Profile",None)]
+st.caption("  ›  ".join(f"**{l}**" if p is None else f"[{l}]({p})" for l, p in _crumb_pages))
 
 questions    = _load_questions()
 profile      = _load_profile()
 derived      = profile.get("derived", {})
 score_result = st.session_state.get("profile_score_result")
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_score, tab_q, tab_approach = st.tabs(["Score", "Questionnaire", "Investment Approach"])
+_profile_complete = derived.get("risk_score") is not None
+_has_answers      = ANSWERS_PATH.exists()
+
+# ── Onboarding banner ─────────────────────────────────────────────────────────
+if not _has_answers:
+    st.info(
+        "**Welcome — let's build your investor profile.**  \n"
+        "Answer the questions in the **Questionnaire** tab below. "
+        "It takes about 2 minutes and tells us how to calibrate your portfolio analysis.  \n"
+        "Your answers are saved locally and never leave your computer."
+    )
+
+# ── Tabs — Questionnaire first for new users, Score first once complete ───────
+if _profile_complete:
+    tab_score, tab_q, tab_approach = st.tabs(["Score", "Questionnaire", "Investment Approach"])
+else:
+    tab_q, tab_score, tab_approach = st.tabs(["Questionnaire", "Score", "Investment Approach"])
 
 
 # ===========================================================================
@@ -246,9 +254,12 @@ with tab_score:
         st.caption(f"Last scored: {last_scored}")
 
     st.divider()
+    if not _has_answers:
+        st.warning("Answer the **Questionnaire** tab first, then return here to run the scorer.")
+
     btn_col, clr_col = st.columns([1, 7])
     with btn_col:
-        if st.button("Run Scorer", type="primary"):
+        if st.button("Run Scorer", type="primary", disabled=not _has_answers):
             with st.spinner("Scoring…"):
                 st.session_state["profile_score_result"] = _run_profile_score()
             st.rerun()
@@ -393,8 +404,12 @@ with tab_q:
             with st.spinner("Scoring…"):
                 st.session_state["profile_score_result"] = _run_profile_score()
             answered_n = sum(1 for v in form_values.values() if v is not None)
-            st.success(f"Saved {answered_n} of {len(questions)} answers. Score updated — see Score tab.")
+            st.success(f"Saved {answered_n} of {len(questions)} answers. Score updated.")
             st.rerun()
+
+    if _profile_complete:
+        st.success("Profile complete. Head to the **Score** tab to review your risk profile, then return to the Hub.")
+        st.page_link("Home.py", label="← Back to Hub")
 
 
 # ===========================================================================

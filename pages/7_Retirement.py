@@ -896,9 +896,9 @@ def _profile_form() -> dict | None:
                                          help="Age at which bridge income stops. 0 = no bridge income.")
 
         c12, c13, c14, c15 = st.columns(4)
-        rrsp      = c12.number_input("RRSP/RRIF Balance ($)",    min_value=max(0.0, _rrsp_bal) value=max(0.0, _rrsp_bal) step=5_000.0, format="%.0f")
-        tfsa      = c13.number_input("TFSA Balance ($)",          min_value=max(0.0, _tfsa_bal) value=max(0.0, _tfsa_bal)  step=5_000.0, format="%.0f")
-        non_reg   = c14.number_input("Non-Reg Balance ($)",       min_value=max(0.0, _non_reg_bal) value=max(0.0, _non_reg_bal) step=5_000.0, format="%.0f")
+        rrsp      = c12.number_input("RRSP/RRIF Balance ($)",    min_value=max(0.0, _rrsp_bal),    value=max(0.0, _rrsp_bal),    step=5_000.0, format="%.0f")
+        tfsa      = c13.number_input("TFSA Balance ($)",          min_value=max(0.0, _tfsa_bal),    value=max(0.0, _tfsa_bal),    step=5_000.0, format="%.0f")
+        non_reg   = c14.number_input("Non-Reg Balance ($)",       min_value=max(0.0, _non_reg_bal), value=max(0.0, _non_reg_bal), step=5_000.0, format="%.0f")
         tfsa_room = c15.number_input("TFSA Room Remaining ($)",   min_value=0.0, value=28_000.0,  step=500.0,   format="%.0f",
                                      help="Available TFSA contribution room. Check your CRA My Account or last NOA. New room of $7,000 is added each January.")
 
@@ -1070,8 +1070,21 @@ def _profile_form() -> dict | None:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _breadcrumb(current: str) -> None:
+    pages = [
+        ("Hub",           "Home.py"),
+        ("Portfolio",     "pages/1_Portfolio.py"),
+        ("Analysis",      "pages/5_Analysis.py"),
+        ("Wealth Builder","pages/6_WealthBuilder.py"),
+        ("Retirement",    None),
+    ]
+    parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
+    st.caption("  ›  ".join(parts))
+
+
 def main():
     st.title("Retirement Planner")
+    _breadcrumb("Retirement")
     st.caption(_DISCLAIMER)
     st.divider()
 

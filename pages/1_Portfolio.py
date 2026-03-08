@@ -66,9 +66,27 @@ def _bucket_label(key: str) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def _breadcrumb(current: str) -> None:
+    pages = [
+        ("Hub",           "Home.py"),
+        ("Portfolio",     None),
+        ("Analysis",      "pages/5_Analysis.py"),
+        ("Wealth Builder","pages/6_WealthBuilder.py"),
+        ("Retirement",    "pages/7_Retirement.py"),
+    ]
+    parts = []
+    for label, page in pages:
+        if label == current:
+            parts.append(f"**{label}**")
+        else:
+            parts.append(f"[{label}]({page})" if page else label)
+    st.caption("  ›  ".join(parts))
+
+
 def main() -> None:
     st.set_page_config(page_title="Auri — Portfolio Dashboard", layout="wide")
     st.title("Portfolio Dashboard")
+    _breadcrumb("Portfolio")
     st.caption("Live prices · sector analysis · income tracking · offline by default")
 
     # Refresh clears the summary cache and all derived session state.
@@ -103,19 +121,26 @@ def main() -> None:
         except Exception:
             pass
 
+    # (label, done, page_link, link_text)
     _steps = [
-        (_has_data,      "Portfolio data loaded",           "Upload a CSV and add it to `data/portfolio/accounts.yaml`"),
-        (_has_risk,      "Risk score computed",             "Go to **Investor Profile → Questionnaire** and click Save & Score"),
-        (_has_targets,   "Target allocation defined",       "Go to **Analysis → Suggest from Risk Score** or create `targets.yaml`"),
-        (_has_snapshots, "First snapshot saved",            "Go to **Snapshots** and click **Create Snapshot** to start your history"),
+        ("Portfolio data loaded",        _has_data,      "pages/wizard.py",      "Upload Wizard →"),
+        ("Investor questionnaire done",  _has_risk,      "pages/profile.py",     "Complete Questionnaire →"),
+        ("Risk score computed",          _has_risk,      "pages/profile.py",     "Run Scorer →"),
+        ("Target allocation defined",    _has_targets,   "pages/5_Analysis.py",  "Suggest from Risk Score →"),
+        ("First snapshot saved",         _has_snapshots, "pages/snapshots.py",   "Create Snapshot →"),
     ]
-    _incomplete = [s for s in _steps if not s[0]]
+    _incomplete = [s for s in _steps if not s[1]]
 
     if _incomplete:
         with st.expander(f"Setup checklist  —  {len(_incomplete)} step{'s' if len(_incomplete) != 1 else ''} remaining", expanded=False):
-            for done, label, hint in _steps:
+            for label, done, page, link_text in _steps:
                 icon = "✅" if done else "⬜"
-                st.markdown(f"{icon} **{label}**" + (f"  \n  _{hint}_" if not done else ""))
+                if done:
+                    st.markdown(f"{icon} {label}")
+                else:
+                    _sc1, _sc2 = st.columns([4, 1])
+                    _sc1.markdown(f"{icon} **{label}**")
+                    _sc2.page_link(page, label=link_text)
 
     # ── Allocation drift banner ───────────────────────────────────────────
     _alloc = load_allocation()
