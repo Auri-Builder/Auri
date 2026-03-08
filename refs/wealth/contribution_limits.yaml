@@ -1,0 +1,53 @@
+# refs/wealth/contribution_limits.yaml
+# Canadian RRSP and TFSA annual contribution limits.
+# RRSP: statutory dollar max (actual room = min(18% prior-year earned income, dollar_max) + carry-forward)
+# TFSA: annual new room added per eligible year
+# Sources: CRA — updated to 2026 confirmed; 2027+ are placeholder estimates.
+
+rrsp_dollar_max:
+  2009: 21000
+  2010: 22000
+  2011: 22450
+  2012: 22970
+  2013: 23820
+  2014: 24270
+  2015: 24930
+  2016: 25370
+  2017: 26010
+  2018: 26230
+  2019: 26500
+  2020: 27230
+  2021: 27830
+  2022: 29210
+  2023: 30780
+  2024: 31560
+  2025: 32490
+  2026: 33310
+  2027: 34200  # estimate
+  2028: 35100  # estimate
+  2029: 36000  # estimate
+  2030: 36900  # estimate
+
+tfsa_annual_room:
+  2009: 5000
+  2010: 5000
+  2011: 5000
+  2012: 5000
+  2013: 5500
+  2014: 5500
+  2015: 10000
+  2016: 5500
+  2017: 5500
+  2018: 5500
+  2019: 6000
+  2020: 6000
+  2021: 6000
+  2022: 6000
+  2023: 6500
+  2024: 7000
+  2025: 7000
+  2026: 7000
+  2027: 7000  # estimate
+  2028: 7000  # estimate
+  2029: 7500  # estimate
+  2030: 7500  # estimate

@@ -131,6 +131,40 @@ def _retirement_status() -> dict:
         return {}
 
 
+def _wealth_status() -> dict:
+    """Read wealth builder profile if available."""
+    profile_path = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    if not profile_path.exists():
+        return {}
+    try:
+        import yaml
+        wp  = yaml.safe_load(profile_path.read_text()) or {}
+        fin = wp.get("financials", {})
+        pref = wp.get("preferences", {})
+        nw   = wp.get("net_worth", {})
+
+        current_age = int(fin.get("current_age", 0))
+        ret_age     = int(fin.get("target_retirement_age", 0))
+        if not current_age or not ret_age:
+            return {}
+
+        # Net worth from saved balance sheet
+        total_assets = sum(float(a.get("value", 0)) for a in nw.get("assets", []))
+        total_liab   = sum(float(l.get("balance", 0)) for l in nw.get("liabilities", []))
+        net_worth    = total_assets - total_liab if total_assets else None
+
+        return {
+            "current_age":    current_age,
+            "ret_age":        ret_age,
+            "yrs_to_ret":     ret_age - current_age,
+            "risk":           pref.get("risk_tolerance", "moderate").capitalize(),
+            "net_worth":      net_worth,
+            "province":       pref.get("province", ""),
+        }
+    except Exception:
+        return {}
+
+
 def _ai_status() -> str:
     """Return short label for configured AI provider, or empty string."""
     try:
@@ -157,10 +191,12 @@ def main() -> None:
     _ret_path      = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
     _ai_ok         = bool(_ai_status())
 
+    _wealth_path = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
     _steps = [
-        (_accounts_path.exists(), "Portfolio CSV uploaded",      "pages/wizard.py",        "Upload Wizard →"),
-        (_ai_ok,                  "AI provider configured",      "pages/wizard.py",        "Configure in Upload Wizard →"),
-        (_ret_path.exists(),      "Retirement profile entered",  "pages/6_Retirement.py",  "Retirement Planner →"),
+        (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",          "Upload Wizard →"),
+        (_ai_ok,                  "AI provider configured",         "pages/wizard.py",          "Configure in Upload Wizard →"),
+        (_ret_path.exists(),      "Retirement profile entered",     "pages/6_Retirement.py",    "Retirement Planner →"),
+        (_wealth_path.exists(),   "Wealth Builder profile entered", "pages/7_WealthBuilder.py", "Wealth Builder →"),
     ]
     _incomplete = [s for s in _steps if not s[0]]
     if _incomplete:
@@ -182,6 +218,7 @@ def main() -> None:
     # ── Agent cards ───────────────────────────────────────────────────────
     portfolio = _portfolio_status()
     retirement = _retirement_status()
+    wealth = _wealth_status()
 
     card1, card2, card3 = st.columns(3, gap="large")
 
@@ -249,23 +286,24 @@ def main() -> None:
             st.divider()
             st.page_link("pages/6_Retirement.py", label="Retirement Planner →")
 
-    # ── Card 3: Wealth Builder (coming soon) ──────────────────────────────
+    # ── Card 3: Wealth Builder ────────────────────────────────────────────
     with card3:
         with st.container(border=True):
             st.markdown("### Wealth Builder")
-            st.caption("Accumulation planning · RRSP/TFSA strategy · goal tracking")
+            st.caption("RRSP/TFSA optimizer · FI projector · allocation · net worth")
             st.divider()
-            st.info(
-                "Coming next — for investors in the accumulation phase "
-                "(age 25–55 building toward retirement)."
-            )
-            st.markdown("""
-**Planned features:**
-- RRSP vs TFSA contribution optimizer
-- Savings rate → retirement age calculator
-- Asset allocation by goal horizon
-- Automatic rebalancing guidance
-            """)
+            if wealth:
+                w1, w2 = st.columns(2)
+                w1.metric("Years to Retirement", wealth["yrs_to_ret"])
+                if wealth["net_worth"] is not None:
+                    w2.metric("Net Worth", _fmt_cad(wealth["net_worth"]))
+                else:
+                    w2.metric("Risk Tolerance", wealth["risk"])
+                st.caption(f"Age {wealth['current_age']} → {wealth['ret_age']} · {wealth['risk']} · {wealth['province']}")
+            else:
+                st.info("No profile yet — get started below.")
+            st.divider()
+            st.page_link("pages/7_WealthBuilder.py", label="Wealth Builder →")
 
     st.divider()
 

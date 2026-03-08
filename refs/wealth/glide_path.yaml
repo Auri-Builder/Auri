@@ -1,0 +1,49 @@
+# refs/wealth/glide_path.yaml
+# Target asset allocation by years-to-retirement and risk tolerance.
+# Buckets: equities (growth), bonds/GICs (stability), cash/HISA (liquidity)
+# All values in percent; each row sums to 100.
+#
+# Based on broadly accepted lifecycle investing principles (target-date fund glide paths).
+# Users should adjust for personal risk tolerance and specific goals.
+# This is a planning guide — not investment advice.
+
+# years_to_retirement: [equities%, bonds%, cash%]
+# Three risk tolerance bands: conservative, moderate, aggressive
+
+conservative:
+  ">25":  [70, 25, 5]
+  "20-25": [65, 28, 7]
+  "15-20": [55, 35, 10]
+  "10-15": [45, 42, 13]
+  "5-10":  [35, 48, 17]
+  "2-5":   [25, 53, 22]
+  "<2":    [15, 55, 30]
+
+moderate:
+  ">25":  [85, 12, 3]
+  "20-25": [80, 16, 4]
+  "15-20": [70, 24, 6]
+  "10-15": [60, 32, 8]
+  "5-10":  [48, 40, 12]
+  "2-5":   [35, 48, 17]
+  "<2":    [20, 55, 25]
+
+aggressive:
+  ">25":  [95, 4, 1]
+  "20-25": [90, 8, 2]
+  "15-20": [82, 14, 4]
+  "10-15": [72, 22, 6]
+  "5-10":  [58, 32, 10]
+  "2-5":   [42, 43, 15]
+  "<2":    [25, 52, 23]
+
+# Labels for UI display
+bucket_labels:
+  equities: "Equities (Growth)"
+  bonds:    "Bonds / GICs (Stability)"
+  cash:     "Cash / HISA (Liquidity)"
+
+bucket_colours:
+  equities: "#2563EB"
+  bonds:    "#7C3AED"
+  cash:     "#059669"
