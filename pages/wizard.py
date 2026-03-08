@@ -292,6 +292,81 @@ for uf in uploaded_files:
                 st.page_link("pages/1_Portfolio.py", label="Go to Portfolio and click Refresh")
                 st.rerun()
 
+# ── Personal Profile ───────────────────────────────────────────────────────
+
+st.divider()
+st.subheader("Personal Profile")
+st.caption(
+    "Shared across all Auri agents — enter once, used by Wealth Builder and Retirement Planner. "
+    "Stored locally in **data/shared_profile.yaml** (gitignored)."
+)
+
+from core.shared_profile import (  # noqa: PLC0415
+    PROVINCES, RISK_LEVELS, load_shared_profile, save_shared_profile,
+)
+
+_sp = load_shared_profile()
+_sp_primary = _sp.get("primary", {})
+_sp_spouse  = _sp.get("spouse")
+
+_profile_configured = bool(_sp_primary.get("current_age"))
+if _profile_configured:
+    st.success(
+        f"Profile configured: **{_sp_primary.get('name', 'Primary')}** · "
+        f"Age {_sp_primary.get('current_age')} · {_sp_primary.get('province', 'BC')} · "
+        f"Retire at {_sp_primary.get('target_retirement_age', 65)}"
+        + (f" · Spouse: {_sp_spouse.get('name', 'Spouse')}" if _sp_spouse else "")
+    )
+
+with st.expander("Set up personal profile", expanded=not _profile_configured):
+    st.markdown("**Primary Person**")
+    _pc1, _pc2, _pc3 = st.columns(3)
+    _p_name  = _pc1.text_input("Name", value=_sp_primary.get("name", ""), placeholder="e.g. Jeff", key="sp_name")
+    _p_age   = _pc2.number_input("Current Age", min_value=18, max_value=80,
+                                  value=int(_sp_primary.get("current_age", 45)), key="sp_age")
+    _p_prov  = _pc3.selectbox("Province", PROVINCES,
+                               index=PROVINCES.index(_sp_primary.get("province", "BC")), key="sp_prov")
+
+    _pc4, _pc5, _pc6 = st.columns(3)
+    _p_income  = _pc4.number_input("Gross Annual Income ($)", min_value=0, max_value=1_000_000,
+                                    value=int(_sp_primary.get("gross_income", 0)), step=1_000, key="sp_income")
+    _p_risk    = _pc5.selectbox("Risk Tolerance", RISK_LEVELS,
+                                 index=RISK_LEVELS.index(_sp_primary.get("risk_tolerance", "moderate")),
+                                 key="sp_risk")
+    _p_ret_age = _pc6.number_input("Target Retirement Age", min_value=40, max_value=75,
+                                    value=int(_sp_primary.get("target_retirement_age", 65)), key="sp_ret")
+
+    st.markdown("**Spouse / Partner** *(optional — leave Name blank to skip)*")
+    _sc1, _sc2, _sc3 = st.columns(3)
+    _s_name   = _sc1.text_input("Spouse Name", value=(_sp_spouse or {}).get("name", ""),
+                                  placeholder="e.g. Julie", key="sp_s_name")
+    _s_age    = _sc2.number_input("Spouse Age", min_value=18, max_value=80,
+                                   value=int((_sp_spouse or {}).get("current_age", 45)), key="sp_s_age")
+    _s_income = _sc3.number_input("Spouse Gross Income ($)", min_value=0, max_value=1_000_000,
+                                   value=int((_sp_spouse or {}).get("gross_income", 0)),
+                                   step=1_000, key="sp_s_income")
+
+    if st.button("Save Personal Profile", type="primary", key="sp_save"):
+        _new_profile: dict = {
+            "primary": {
+                "name":                  _p_name.strip() or "Primary",
+                "current_age":           int(_p_age),
+                "province":              _p_prov,
+                "gross_income":          float(_p_income),
+                "risk_tolerance":        _p_risk,
+                "target_retirement_age": int(_p_ret_age),
+            }
+        }
+        if _s_name.strip():
+            _new_profile["spouse"] = {
+                "name":         _s_name.strip(),
+                "current_age":  int(_s_age),
+                "gross_income": float(_s_income),
+            }
+        save_shared_profile(_new_profile)
+        st.success("Personal profile saved.")
+        st.rerun()
+
 # ── AI Provider Configuration ──────────────────────────────────────────────
 
 st.divider()

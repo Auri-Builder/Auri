@@ -191,10 +191,12 @@ def main() -> None:
     _ret_path      = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
     _ai_ok         = bool(_ai_status())
 
-    _wealth_path = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    _wealth_path  = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    _shared_path  = PROJECT_ROOT / "data" / "shared_profile.yaml"
     _steps = [
         (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",          "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",         "pages/wizard.py",          "Configure in Upload Wizard →"),
+        (_shared_path.exists(),   "Personal profile set up",        "pages/wizard.py",          "Set up in Wizard →"),
         (_ret_path.exists(),      "Retirement profile entered",     "pages/7_Retirement.py",    "Retirement Planner →"),
         (_wealth_path.exists(),   "Wealth Builder profile entered", "pages/6_WealthBuilder.py", "Wealth Builder →"),
     ]

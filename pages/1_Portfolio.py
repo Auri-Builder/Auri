@@ -645,10 +645,16 @@ def main() -> None:
                 _rs_col3.caption(
                     f"Total retirement assets: ${_readiness['total_portfolio']:,.0f} · "
                     f"Guaranteed income: ${_readiness['guaranteed_annual']:,.0f}/yr · "
-                    f"[See full breakdown on the Retirement page](6_Retirement)"
+                    f"[See full breakdown on the Retirement page](7_Retirement)"
                 )
         except Exception:
             pass  # Silently skip if retirement planner not installed or profile malformed
+
+    # ── Handoff banner ────────────────────────────────────────────────────
+    st.divider()
+    _h1, _h2 = st.columns(2)
+    _h1.page_link("pages/6_WealthBuilder.py", label="Wealth Builder — am I on track? →")
+    _h2.page_link("pages/7_Retirement.py",    label="Retirement Planner — when can I stop? →")
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.divider()

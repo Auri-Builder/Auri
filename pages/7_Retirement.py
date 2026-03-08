@@ -830,10 +830,39 @@ def _profile_form() -> dict | None:
     st.subheader("Retirement Profile")
     st.caption("Enter your current financial details. This data is used only for local computation and is never transmitted.")
 
+    # ── Pull defaults from shared profile + portfolio CSV ─────────────────
+    try:
+        from core.shared_profile import load_shared_profile, get_account_balances  # noqa: PLC0415
+        _sp      = load_shared_profile()
+        _sp_p    = _sp.get("primary", {})
+        _sp_s    = _sp.get("spouse")
+        _acct    = get_account_balances()
+        from agents.ori_ia.schema import REGISTERED_ACCOUNT_TYPES as _REG  # noqa: PLC0415
+        _rrsp_bal    = float(_acct.get("RRSP", 0) or _acct.get("RRIF", 0))
+        _tfsa_bal    = float(_acct.get("TFSA", 0))
+        _non_reg_bal = float(sum(v for k, v in _acct.items() if k not in _REG))
+        _age_def     = int(_sp_p.get("current_age", 55))
+        _ret_def     = int(_sp_p.get("target_retirement_age", 65))
+        _prov_def    = _sp_p.get("province")
+        _has_sp_def  = _sp_s is not None
+        _sp_age_def  = int((_sp_s or {}).get("current_age", 55))
+        if _rrsp_bal or _tfsa_bal:
+            st.info(
+                f"Account balances pre-filled from portfolio CSV — "
+                f"RRSP ${_rrsp_bal:,.0f} \u00b7 TFSA ${_tfsa_bal:,.0f}. "
+                "Adjust if your balances have changed since the last upload."
+            )
+    except Exception:
+        _age_def = 55; _ret_def = 65; _prov_def = None
+        _rrsp_bal = 450_000.0; _tfsa_bal = 95_000.0; _non_reg_bal = 180_000.0
+        _has_sp_def = False; _sp_age_def = 55
+
+
     # has_spouse OUTSIDE the form so toggling it immediately shows/hides spouse fields
     # without requiring a form submit first.
     has_spouse = st.checkbox(
         "Add spouse / common-law partner",
+        value=_has_sp_def,
         key="rp_has_spouse",
     )
 
@@ -842,10 +871,10 @@ def _profile_form() -> dict | None:
     with st.form("retirement_profile_form"):
         st.markdown("**Primary Person**")
         c1, c2, c3 = st.columns(3)
-        age        = c1.number_input("Current Age",    min_value=18, max_value=95, value=55, step=1)
-        ret_age    = c2.number_input("Retirement Age", min_value=18, max_value=95, value=65, step=1)
+        age        = c1.number_input("Current Age",    min_value=_age_def, max_value=_age_def, value=_age_def, step=1)
+        ret_age    = c2.number_input("Retirement Age", min_value=_ret_def, max_value=_ret_def, value=_ret_def, step=1)
         # Default to last-used province (persisted in session_state)
-        _prov_default = st.session_state.get("rp_province", "ON")
+        _prov_default = _prov_def or st.session_state.get("rp_province", "ON")
         _prov_idx  = _PROV_OPTIONS.index(_prov_default) if _prov_default in _PROV_OPTIONS else 0
         province   = c3.selectbox("Province", _PROV_OPTIONS, index=_prov_idx)
 
@@ -867,9 +896,9 @@ def _profile_form() -> dict | None:
                                          help="Age at which bridge income stops. 0 = no bridge income.")
 
         c12, c13, c14, c15 = st.columns(4)
-        rrsp      = c12.number_input("RRSP/RRIF Balance ($)",    min_value=0.0, value=450_000.0, step=5_000.0, format="%.0f")
-        tfsa      = c13.number_input("TFSA Balance ($)",          min_value=0.0, value=95_000.0,  step=5_000.0, format="%.0f")
-        non_reg   = c14.number_input("Non-Reg Balance ($)",       min_value=0.0, value=180_000.0, step=5_000.0, format="%.0f")
+        rrsp      = c12.number_input("RRSP/RRIF Balance ($)",    min_value=max(0.0, _rrsp_bal) value=max(0.0, _rrsp_bal) step=5_000.0, format="%.0f")
+        tfsa      = c13.number_input("TFSA Balance ($)",          min_value=max(0.0, _tfsa_bal) value=max(0.0, _tfsa_bal)  step=5_000.0, format="%.0f")
+        non_reg   = c14.number_input("Non-Reg Balance ($)",       min_value=max(0.0, _non_reg_bal) value=max(0.0, _non_reg_bal) step=5_000.0, format="%.0f")
         tfsa_room = c15.number_input("TFSA Room Remaining ($)",   min_value=0.0, value=28_000.0,  step=500.0,   format="%.0f",
                                      help="Available TFSA contribution room. Check your CRA My Account or last NOA. New room of $7,000 is added each January.")
 
@@ -1588,6 +1617,12 @@ def main():
             col_note.success(f"Saved to `{saved_path.relative_to(PROJECT_ROOT)}`")
         except Exception as exc:
             col_note.error(f"Save failed: {exc}")
+
+    # ── Handoff banner ────────────────────────────────────────────────────
+    st.divider()
+    _rh1, _rh2 = st.columns(2)
+    _rh1.page_link("pages/1_Portfolio.py",   label="← Portfolio IA — what do I own?")
+    _rh2.page_link("pages/6_WealthBuilder.py", label="← Wealth Builder — am I on track?")
 
     # ── Disclaimer footer ──────────────────────────────────────────────────
     st.divider()

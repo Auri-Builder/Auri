@@ -152,6 +152,31 @@ def compute_account_type_split(
     return {k: round(v, 2) for k, v in buckets.items() if v != 0.0}
 
 
+def compute_account_balance_by_type(
+    rows: list[dict],
+    account_type_override: Optional[str] = None,
+) -> dict[str, float]:
+    """
+    Break down total market value by specific account type string.
+
+    Unlike compute_account_type_split (which collapses to registered/non_registered),
+    this preserves the raw account_type values so downstream agents can distinguish
+    RRSP from TFSA from CASH etc.
+
+    Returns:
+        {account_type_upper: total_market_value} e.g.
+        {"RRSP": 120000.00, "TFSA": 45000.00, "CASH": 30000.00}
+        Zero-value types omitted.
+    """
+    result: dict[str, float] = {}
+    for r in rows:
+        raw_type  = (r.get("account_type") or account_type_override or "UNCLASSIFIED").strip()
+        acct_type = raw_type.upper() or "UNCLASSIFIED"
+        mv        = float(r.get("market_value") or 0.0)
+        result[acct_type] = result.get(acct_type, 0.0) + mv
+    return {k: round(v, 2) for k, v in sorted(result.items()) if v > 0}
+
+
 def compute_concentration_flags(
     position_weights: dict[str, float],
     threshold: float = 0.10,
@@ -528,6 +553,7 @@ def build_summary(
             "top_positions":              [{symbol, weight_pct}, ...],
             "sector_weights_pct":         {sector: pct, ...},
             "account_type_split":         {bucket: market_value, ...},
+            "account_balance_by_type":    {account_type: market_value, ...},
             "concentration_flags":        [{symbol, weight_pct, flag}, ...],
             "concentration_threshold_pct": float,
             "total_cost_basis":           float|None,
@@ -562,6 +588,7 @@ def build_summary(
         "top_positions": compute_top_n(position_weights, top_n),
         "sector_weights_pct": compute_sector_weights(rows, total_mv),
         "account_type_split": compute_account_type_split(rows, account_type_override),
+        "account_balance_by_type": compute_account_balance_by_type(rows, account_type_override),
         "concentration_flags": compute_concentration_flags(position_weights, concentration_threshold),
         "concentration_threshold_pct": round(concentration_threshold * 100, 1),
         "total_cost_basis":          total_cost_basis,

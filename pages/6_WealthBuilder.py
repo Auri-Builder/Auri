@@ -71,18 +71,36 @@ def _tab_optimizer(profile: dict) -> None:
         "based on your marginal rate today vs your expected rate in retirement."
     )
 
-    pref = profile.get("preferences", {})
-    fin  = profile.get("financials", {})
+    pref   = profile.get("preferences", {})
+    fin    = profile.get("financials", {})
+
+    from core.shared_profile import load_shared_profile, get_account_balances  # noqa: PLC0415
+    _sp     = load_shared_profile().get("primary", {})
+    _acct   = get_account_balances()
+
+    # Seed defaults: shared profile > WB profile > hardcoded fallback
+    _province_def = pref.get("province") or _sp.get("province", "BC")
+    _income_def   = int(fin.get("gross_income")  or _sp.get("gross_income",  95_000))
+    _yrs_def      = int(fin.get("years_to_retirement") or
+                        max(1, (_sp.get("target_retirement_age", 65) - _sp.get("current_age", 45))))
+
+    # RRSP/TFSA balances from CSV — shown as context, not as room (room ≠ balance)
+    _rrsp_bal = _acct.get("RRSP", 0)
+    _tfsa_bal = _acct.get("TFSA", 0)
+    if _rrsp_bal or _tfsa_bal:
+        st.caption(f"Portfolio CSV: RRSP balance ${_rrsp_bal:,.0f} · TFSA balance ${_tfsa_bal:,.0f} "
+                   f"— contribution *room* is different from balance; check CRA My Account.")
+
+    _provinces = ["BC","AB","ON","QC","SK","MB","NS","NB","PE","NL"]
 
     with st.form("optimizer_form"):
         c1, c2, c3 = st.columns(3)
         gross_income   = c1.number_input("Gross Annual Income ($)", min_value=0, max_value=1_000_000,
-                                          value=int(fin.get("gross_income", 95_000)), step=1_000)
+                                          value=_income_def, step=1_000)
         savings_amount = c2.number_input("Amount to Contribute This Year ($)", min_value=0, max_value=500_000,
                                           value=int(fin.get("annual_savings", 15_000)), step=500)
-        province       = c3.selectbox("Province", ["BC", "AB", "ON", "QC", "SK", "MB", "NS", "NB", "PE", "NL"],
-                                       index=["BC","AB","ON","QC","SK","MB","NS","NB","PE","NL"].index(
-                                           pref.get("province", "BC")))
+        province       = c3.selectbox("Province", _provinces,
+                                       index=_provinces.index(_province_def) if _province_def in _provinces else 0)
 
         c4, c5, c6 = st.columns(3)
         rrsp_room      = c4.number_input("RRSP Room Remaining ($)", min_value=0, max_value=500_000,
@@ -97,7 +115,7 @@ def _tab_optimizer(profile: dict) -> None:
 
         c7, c8 = st.columns(2)
         yrs_to_ret = c7.number_input("Years to Retirement", min_value=1, max_value=50,
-                                      value=int(fin.get("years_to_retirement", 20)), step=1)
+                                      value=_yrs_def, step=1)
         growth_rate = c8.number_input("Expected Annual Return (%)", min_value=0.0, max_value=15.0,
                                        value=float(fin.get("growth_rate_pct", 6.0)), step=0.5)
 
@@ -762,37 +780,75 @@ def _tab_net_worth(profile: dict) -> None:
 # ── Profile form (sidebar) ────────────────────────────────────────────────────
 
 def _profile_sidebar() -> dict:
-    """Load existing profile or return empty. Sidebar quick-save for key fields."""
+    """
+    Load WB local profile, seeding defaults from shared_profile if available.
+    Sidebar quick-save persists to both WB profile and shared_profile.
+    """
+    from core.shared_profile import load_shared_profile, save_shared_profile  # noqa: PLC0415
+
     profile = _load_profile()
+    shared  = load_shared_profile()
+    sp      = shared.get("primary", {})
+
+    # Seed WB profile defaults from shared profile if WB profile is empty
+    fin  = profile.get("financials", {})
+    pref = profile.get("preferences", {})
+    _age_default      = int(fin.get("current_age")      or sp.get("current_age",      35))
+    _ret_default      = int(fin.get("target_retirement_age") or sp.get("target_retirement_age", 60))
+    _income_default   = int(fin.get("gross_income")     or sp.get("gross_income",     95_000))
+    _province_default = pref.get("province")             or sp.get("province",         "BC")
+    _risk_default     = pref.get("risk_tolerance")       or sp.get("risk_tolerance",   "moderate")
+
+    _provinces = ["BC","AB","ON","QC","SK","MB","NS","NB","PE","NL"]
+    _risks     = ["conservative","moderate","aggressive"]
 
     with st.sidebar:
-        st.markdown("### Wealth Builder Profile")
-        with st.expander("Quick Setup", expanded=not profile):
-            fin  = profile.get("financials", {})
-            pref = profile.get("preferences", {})
-            age       = st.number_input("Current Age", 18, 70, int(fin.get("current_age", 35)), key="sb_age")
-            ret_age   = st.number_input("Target Retirement Age", 40, 75, int(fin.get("target_retirement_age", 60)), key="sb_ret")
-            income    = st.number_input("Gross Income ($)", 0, 1_000_000, int(fin.get("gross_income", 95_000)), step=1_000, key="sb_income")
-            province  = st.selectbox("Province", ["BC","AB","ON","QC","SK","MB","NS","NB","PE","NL"],
-                                      index=["BC","AB","ON","QC","SK","MB","NS","NB","PE","NL"].index(pref.get("province","BC")),
-                                      key="sb_prov")
-            risk      = st.selectbox("Risk Tolerance", ["conservative","moderate","aggressive"],
-                                      index=["conservative","moderate","aggressive"].index(pref.get("risk_tolerance","moderate")),
-                                      key="sb_risk")
-            if st.button("Save Profile", use_container_width=True, key="sb_save"):
+        st.markdown("### Wealth Builder")
+        if sp:
+            st.caption(f"Profile: {sp.get('name', 'Primary')} · age {sp.get('current_age', '?')}")
+            st.page_link("pages/wizard.py", label="Edit profile in Wizard →")
+        with st.expander("Quick Setup", expanded=not profile and not sp):
+            age      = st.number_input("Current Age", 18, 70, _age_default, key="sb_age")
+            ret_age  = st.number_input("Target Retirement Age", 40, 75, _ret_default, key="sb_ret")
+            income   = st.number_input("Gross Income ($)", 0, 1_000_000, _income_default, step=1_000, key="sb_income")
+            province = st.selectbox("Province", _provinces,
+                                     index=_provinces.index(_province_default) if _province_default in _provinces else 0,
+                                     key="sb_prov")
+            risk     = st.selectbox("Risk Tolerance", _risks,
+                                     index=_risks.index(_risk_default) if _risk_default in _risks else 1,
+                                     key="sb_risk")
+            if st.button("Save", use_container_width=True, key="sb_save"):
                 profile.setdefault("financials", {}).update({
-                    "current_age": int(age),
+                    "current_age":           int(age),
                     "target_retirement_age": int(ret_age),
-                    "gross_income": float(income),
-                    "years_to_retirement": int(ret_age) - int(age),
+                    "gross_income":          float(income),
+                    "years_to_retirement":   int(ret_age) - int(age),
                 })
                 profile.setdefault("preferences", {}).update({
                     "province":       province,
                     "risk_tolerance": risk,
                 })
                 _save_profile(profile)
+                # Also push back to shared profile so Retirement picks it up
+                shared.setdefault("primary", {}).update({
+                    "current_age":           int(age),
+                    "gross_income":          float(income),
+                    "province":              province,
+                    "risk_tolerance":        risk,
+                    "target_retirement_age": int(ret_age),
+                })
+                save_shared_profile(shared)
                 st.success("Saved.")
                 st.rerun()
+
+        # Account balances from CSV
+        from core.shared_profile import get_account_balances  # noqa: PLC0415
+        _acct = get_account_balances()
+        if _acct:
+            st.divider()
+            st.caption("**From your portfolio CSV:**")
+            for acct_type, bal in _acct.items():
+                st.caption(f"{acct_type}: ${bal:,.0f}")
 
     return profile
 
@@ -823,6 +879,12 @@ def main() -> None:
         _tab_rebalancer(profile)
     with tab5:
         _tab_net_worth(profile)
+
+    # ── Handoff banner ────────────────────────────────────────────────────
+    st.divider()
+    _bh1, _bh2 = st.columns(2)
+    _bh1.page_link("pages/1_Portfolio.py",  label="← Portfolio IA — what do I own?")
+    _bh2.page_link("pages/7_Retirement.py", label="Retirement Planner — when can I stop? →")
 
     st.divider()
     st.caption(
