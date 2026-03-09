@@ -48,13 +48,6 @@ _DISCLAIMER = (
     "accurate figures."
 )
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Retirement Planner · Auri",
-    page_icon="🏦",
-    layout="wide",
-)
-from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 
 # ── Imports (lazy — keep startup fast) ───────────────────────────────────────
 try:
@@ -143,7 +136,14 @@ def _run_scenarios(
 
     annual_target  = float(spending.get("annual_target", 80_000))
     inflation      = float(spending.get("inflation_rate_pct", 2.5))
-    large_exp      = spending.get("large_expenditures", []) or []
+    large_exp_raw  = spending.get("large_expenditures", []) or []
+    # cashflow.py expects {"year": int, ...}; form stores {"age": int, ...} — convert here
+    large_exp = [
+        {"year": base_year + (e["age"] - primary.current_age),
+         "amount": e.get("amount", 0), "label": e.get("label", "")}
+        if "age" in e and "year" not in e else e
+        for e in large_exp_raw
+    ]
     ret_age        = retirement_age if retirement_age is not None else primary.current_age
 
     # Optimistic/Tax-Optimized always defer to 70; Base/Conservative use the user's chosen ages
@@ -833,29 +833,47 @@ def _profile_form() -> dict | None:
 
     # ── Pull defaults from shared profile + portfolio CSV ─────────────────
     try:
-        from core.shared_profile import load_shared_profile, get_account_balances  # noqa: PLC0415
+        from core.shared_profile import load_shared_profile, get_account_balances, get_account_balances_by_owner  # noqa: PLC0415
         _sp      = load_shared_profile()
         _sp_p    = _sp.get("primary", {})
         _sp_s    = _sp.get("spouse")
         _acct    = get_account_balances()
+        _acct_by_owner = get_account_balances_by_owner()
         from agents.ori_ia.schema import REGISTERED_ACCOUNT_TYPES as _REG  # noqa: PLC0415
-        _rrsp_bal    = float(_acct.get("RRSP", 0) or _acct.get("RRIF", 0))
-        _tfsa_bal    = float(_acct.get("TFSA", 0))
-        _non_reg_bal = float(sum(v for k, v in _acct.items() if k not in _REG))
+        if _acct_by_owner:
+            _pri  = _acct_by_owner.get("primary", {})
+            _jnt  = _acct_by_owner.get("joint",   {})
+            _sps  = _acct_by_owner.get("spouse",  {})
+            # Joint non-reg goes to primary; joint RRSP/TFSA impossible by CRA rules
+            _rrsp_bal    = float(_pri.get("RRSP", 0) + _pri.get("RRIF", 0))
+            _tfsa_bal    = float(_pri.get("TFSA", 0))
+            _non_reg_bal = float(sum(v for k, v in _pri.items() if k not in _REG)
+                                 + sum(v for k, v in _jnt.items() if k not in _REG))
+            _sp_rrsp_bal = float(_sps.get("RRSP", 0) + _sps.get("RRIF", 0))
+            _sp_tfsa_bal = float(_sps.get("TFSA", 0))
+            _sp_non_bal  = float(sum(v for k, v in _sps.items() if k not in _REG))
+        else:
+            # No owner info — all accounts to primary, spouse gets zeros
+            _rrsp_bal    = float(_acct.get("RRSP", 0) or _acct.get("RRIF", 0))
+            _tfsa_bal    = float(_acct.get("TFSA", 0))
+            _non_reg_bal = float(sum(v for k, v in _acct.items() if k not in _REG))
+            _sp_rrsp_bal = 0.0; _sp_tfsa_bal = 0.0; _sp_non_bal = 0.0
         _age_def     = int(_sp_p.get("current_age", 55))
         _ret_def     = int(_sp_p.get("target_retirement_age", 65))
         _prov_def    = _sp_p.get("province")
         _has_sp_def  = _sp_s is not None
         _sp_age_def  = int((_sp_s or {}).get("current_age", 55))
         if _rrsp_bal or _tfsa_bal:
+            _owner_note = " · split by account owner" if _acct_by_owner else " · set owner in Setup Wizard to split by spouse"
             st.info(
                 f"Account balances pre-filled from portfolio CSV — "
-                f"RRSP ${_rrsp_bal:,.0f} \u00b7 TFSA ${_tfsa_bal:,.0f}. "
-                "Adjust if your balances have changed since the last upload."
+                f"RRSP ${_rrsp_bal:,.0f} \u00b7 TFSA ${_tfsa_bal:,.0f}."
+                f"{_owner_note}. Adjust if balances have changed since last upload."
             )
     except Exception:
         _age_def = 55; _ret_def = 65; _prov_def = None
-        _rrsp_bal = 450_000.0; _tfsa_bal = 95_000.0; _non_reg_bal = 180_000.0
+        _rrsp_bal = 0.0; _tfsa_bal = 0.0; _non_reg_bal = 0.0
+        _sp_rrsp_bal = 0.0; _sp_tfsa_bal = 0.0; _sp_non_bal = 0.0
         _has_sp_def = False; _sp_age_def = 55
 
 
@@ -906,9 +924,9 @@ def _profile_form() -> dict | None:
         st.markdown("**Spending**")
         s1, s2, s3 = st.columns(3)
         annual_spend = s1.number_input(
-            "Annual Spending Target ($, today's dollars)",
+            "Household Annual Spending Target ($, today's dollars)",
             min_value=0.0, value=80_000.0, step=1_000.0, format="%.0f",
-            help="Take-home spending — does NOT include voluntary TFSA contributions. "
+            help="Combined household take-home spending — does NOT include voluntary TFSA contributions. "
                  "Enter those separately below.",
         )
         tfsa_topup   = s2.number_input(
@@ -986,9 +1004,9 @@ def _profile_form() -> dict | None:
                                              help="Age spouse plans to start OAS.")
 
             cs8, cs9, cs10, cs11 = st.columns(4)
-            sp_rrsp      = cs8.number_input("Spouse RRSP/RRIF ($)",         min_value=0.0, value=120_000.0, step=5_000.0, format="%.0f")
-            sp_tfsa      = cs9.number_input("Spouse TFSA ($)",              min_value=0.0, value=45_000.0,  step=5_000.0, format="%.0f")
-            sp_non       = cs10.number_input("Spouse Non-Reg ($)",          min_value=0.0, value=30_000.0,  step=5_000.0, format="%.0f")
+            sp_rrsp      = cs8.number_input("Spouse RRSP/RRIF ($)",         min_value=0.0, value=_sp_rrsp_bal, step=5_000.0, format="%.0f")
+            sp_tfsa      = cs9.number_input("Spouse TFSA ($)",              min_value=0.0, value=_sp_tfsa_bal, step=5_000.0, format="%.0f")
+            sp_non       = cs10.number_input("Spouse Non-Reg ($)",          min_value=0.0, value=_sp_non_bal,  step=5_000.0, format="%.0f")
             sp_tfsa_room = cs11.number_input("Spouse TFSA Room ($)",        min_value=0.0, value=20_000.0,  step=500.0,   format="%.0f",
                                              help="Spouse's available TFSA contribution room.")
 
@@ -1073,10 +1091,10 @@ def _profile_form() -> dict | None:
 
 def _breadcrumb(current: str) -> None:
     pages = [
-        ("Hub",           "Home.py"),
-        ("Portfolio",     "pages/1_Portfolio.py"),
-        ("Analysis",      "pages/5_Analysis.py"),
-        ("Wealth Builder","pages/6_WealthBuilder.py"),
+        ("Hub",           "/"),
+        ("Portfolio",     "/portfolio"),
+        ("Analysis",      "/analysis"),
+        ("Wealth Builder","/wealthbuilder"),
         ("Retirement",    None),
     ]
     parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
@@ -1219,9 +1237,9 @@ def main():
 
     annual_target = float(spending.get("annual_target", 80_000))
     d1.metric(
-        "Annual Spending Target",
+        "Household Spending Target",
         _fmt_dollar(annual_target),
-        help="Your target annual spending in today's dollars.",
+        help="Combined household annual spending in today's dollars.",
     )
 
     dep_age       = chosen_summary.get("depletion_age")
@@ -1246,8 +1264,14 @@ def main():
 
     # Coverage metric
     if avg_cov >= 100.0:
-        d3.metric("Goal Coverage", "100%",
-                  delta="Fully covered to age 95", delta_color="normal")
+        _surplus_est = final_port / (annual_target * 10) * 100 if annual_target > 0 else 0
+        _surplus_label = (
+            f"Surplus estate ~{_fmt_dollar(final_port)} at 95"
+            if final_port >= annual_target
+            else "Fully covered to age 95"
+        )
+        d3.metric("Goal Coverage", "100% — Over-funded" if final_port >= annual_target else "100%",
+                  delta=_surplus_label, delta_color="normal")
     elif uncov_age:
         d3.metric("Goal Coverage", f"{avg_cov:.0f}% avg",
                   delta=f"Drops below 100% at age {uncov_age}", delta_color="inverse",
@@ -1511,24 +1535,34 @@ def main():
         )
 
         if st.button("Run Monte Carlo", type="primary", key="mc_run"):
-            mc_sc, mc_rows, mc_summary, _ = next(
-                (sc, rows, s, d) for sc, rows, s, d in scenario_runs
-                if sc.name == mc_scenario_name
-            )
-            with st.spinner(f"Running {mc_n_sims} simulations..."):
-                try:
-                    mc_result = run_monte_carlo(
-                        deterministic_rows=mc_rows,
-                        mu=mc_sc.portfolio_return_pct,
-                        asset_mix=mc_asset_mix,
-                        n_sims=mc_n_sims,
-                        seed=42,
-                    )
-                    st.session_state["mc_result"]      = mc_result
-                    st.session_state["mc_scenario_run"] = (mc_sc, mc_rows, mc_summary)
-                except Exception as exc:
-                    st.error(f"Monte Carlo error: {exc}")
-                    logger.exception("Monte Carlo failed")
+            try:
+                mc_sc, mc_rows, mc_summary, _ = next(
+                    (sc, rows, s, d) for sc, rows, s, d in scenario_runs
+                    if sc.name == mc_scenario_name
+                )
+            except StopIteration:
+                st.error("Run Projection first before running Monte Carlo.")
+                mc_sc = None
+            if mc_sc is not None:
+                with st.spinner(f"Running {mc_n_sims} simulations..."):
+                    try:
+                        mc_result = run_monte_carlo(
+                            deterministic_rows=mc_rows,
+                            mu=mc_sc.portfolio_return_pct,
+                            asset_mix=mc_asset_mix,
+                            n_sims=mc_n_sims,
+                            seed=42,
+                        )
+                        st.session_state["mc_result"]       = mc_result
+                        st.session_state["mc_scenario_run"] = (mc_sc, mc_rows, mc_summary)
+                        st.session_state["mc_just_ran"]     = True
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Monte Carlo error: {exc}")
+                        logger.exception("Monte Carlo failed")
+
+        if st.session_state.pop("mc_just_ran", False):
+            st.success(f"Monte Carlo complete ({st.session_state.get('mc_result', {}).get('n_sims', '')} simulations). Results below.")
 
         if "mc_result" in st.session_state:
             mc_result = st.session_state["mc_result"]

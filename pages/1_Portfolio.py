@@ -23,7 +23,7 @@ import streamlit as st
 
 from core.dashboard_cache import fetch_benchmark, load_allocation, load_dashboard_config, load_summary
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +68,11 @@ def _bucket_label(key: str) -> str:
 
 def _breadcrumb(current: str) -> None:
     pages = [
-        ("Hub",           "Home.py"),
+        ("Hub",           "/"),
         ("Portfolio",     None),
-        ("Analysis",      "pages/5_Analysis.py"),
-        ("Wealth Builder","pages/6_WealthBuilder.py"),
-        ("Retirement",    "pages/7_Retirement.py"),
+        ("Analysis",      "/analysis"),
+        ("Wealth Builder","/wealthbuilder"),
+        ("Retirement",    "/retirement"),
     ]
     parts = []
     for label, page in pages:
@@ -84,8 +84,6 @@ def _breadcrumb(current: str) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Auri — Portfolio Dashboard", layout="wide")
-    from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
     st.title("Portfolio Dashboard")
     _breadcrumb("Portfolio")
     st.caption("Live prices · sector analysis · income tracking · offline by default")

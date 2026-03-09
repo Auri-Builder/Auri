@@ -106,6 +106,23 @@ def get_account_balances() -> dict:
         return {}
 
 
+def get_account_balances_by_owner() -> dict:
+    """
+    Return {owner: {account_type: balance}} split by account owner field in accounts.yaml.
+
+    e.g. {"primary": {"RRSP": 500000, "TFSA": 100000},
+          "spouse":  {"RRSP": 200000, "TFSA": 50000},
+          "joint":   {"CASH": 80000}}
+
+    Returns empty dict if portfolio not loaded or no owner fields set.
+    """
+    try:
+        from core.dashboard_cache import load_summary  # noqa: PLC0415
+        return load_summary().get("account_balance_by_owner", {})
+    except Exception:
+        return {}
+
+
 def registered_balance(account_types: list[str] | None = None) -> float:
     """
     Sum of all registered account balances (RRSP + TFSA + RRIF + LIRA etc.)

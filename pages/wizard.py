@@ -87,8 +87,6 @@ def _find_existing_by_account_id(account_id: str, accounts: dict) -> tuple[str, 
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Auri · Upload Wizard", layout="wide")
-from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Upload Wizard")
 st.caption("Add CSV portfolio exports · configure account metadata · local only · no network calls")
 
@@ -259,7 +257,7 @@ for uf in uploaded_files:
 
         _type_idx = ACCOUNT_TYPE_OPTIONS.index(_guess_type) if _guess_type in ACCOUNT_TYPE_OPTIONS else 0
 
-        _tc1, _tc2 = st.columns([2, 1])
+        _tc1, _tc2, _tc3 = st.columns([2, 1, 1])
         account_type = _tc1.selectbox(
             "Account type",
             options=ACCOUNT_TYPE_OPTIONS,
@@ -271,6 +269,12 @@ for uf in uploaded_files:
             "Label (optional)",
             placeholder="e.g. Jeff TFSA",
             key=f"label_{safe_name}",
+        )
+        owner = _tc3.selectbox(
+            "Account Owner",
+            options=["Primary", "Spouse", "Joint"],
+            key=f"owner_{safe_name}",
+            help="Who owns this account — used to split balances in Retirement Planner.",
         )
 
         with st.expander("Advanced (auto-detected — change only if wrong)"):
@@ -290,15 +294,17 @@ for uf in uploaded_files:
                 shutil.copy(tmp_path, PORTFOLIO_DIR / safe_name)
 
                 current = _load_accounts()
-                if safe_name not in current:
-                    entry = {"account_type": account_type, "institution": institution}
-                    if account_id_input:
-                        entry["account_id"] = account_id_input
-                    if label:
-                        entry["label"] = label
-                    entry["currency"] = currency
-                    current[safe_name] = entry
-                    _save_accounts(current)
+                entry = current.get(safe_name, {})
+                entry["account_type"] = account_type
+                entry["institution"] = institution
+                if account_id_input:
+                    entry["account_id"] = account_id_input
+                if label:
+                    entry["label"] = label
+                entry["currency"] = currency
+                entry["owner"] = owner.lower()
+                current[safe_name] = entry
+                _save_accounts(current)
 
                 st.session_state.saved.add(uf.name)
                 total_now = len(_load_accounts())
@@ -568,4 +574,5 @@ with st.expander("Configure AI provider", expanded=not is_configured()):
 # ── Footer ─────────────────────────────────────────────────────────────────
 
 st.divider()
-st.page_link("Home.py", label="Go to Hub")
+if st.button("Go to Hub"):
+        st.switch_page("pages/hub.py")

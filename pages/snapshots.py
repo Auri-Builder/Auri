@@ -121,8 +121,6 @@ def _load_history() -> pd.DataFrame:
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Auri · Snapshots", layout="wide")
-from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Snapshots")
 st.caption(
     "Point-in-time portfolio snapshots · aggregates only · "
@@ -406,4 +404,5 @@ else:
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 st.divider()
-st.page_link("Home.py", label="Go to Hub")
+if st.button("Go to Hub"):
+        st.switch_page("pages/hub.py")

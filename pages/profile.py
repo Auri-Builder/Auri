@@ -168,12 +168,10 @@ def _fmt_score(v: float | None) -> str:
 # Page
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Auri · Investor Profile", layout="wide")
-from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Investor Profile")
 
 # Breadcrumb
-_crumb_pages = [("Hub","Home.py"),("Portfolio","pages/1_Portfolio.py"),("Investor Profile",None)]
+_crumb_pages = [("Hub","/"),("Portfolio","/portfolio"),("Investor Profile",None)]
 st.caption("  ›  ".join(f"**{l}**" if p is None else f"[{l}]({p})" for l, p in _crumb_pages))
 
 questions    = _load_questions()
@@ -305,7 +303,7 @@ with tab_score:
     if profile.get("philosophy"):
         st.divider()
         st.subheader("Investment Philosophy")
-        st.markdown(profile["philosophy"])
+        st.markdown(profile["philosophy"].replace("$", r"\$"))
 
     # Objectives summary
     if profile:
@@ -405,12 +403,19 @@ with tab_q:
             with st.spinner("Scoring…"):
                 st.session_state["profile_score_result"] = _run_profile_score()
             answered_n = sum(1 for v in form_values.values() if v is not None)
-            st.success(f"Saved {answered_n} of {len(questions)} answers. Score updated.")
+            st.session_state["_q_saved_msg"] = (
+                f"Saved {answered_n} of {len(questions)} answers — scorer ran. "
+                "Review your risk profile on the **Score** tab, then fill in the **Investment Approach** tab "
+                "to personalise your AI commentary."
+            )
             st.rerun()
 
+    if st.session_state.get("_q_saved_msg"):
+        st.success(st.session_state.pop("_q_saved_msg"))
+
     if _profile_complete:
-        st.success("Profile complete. Head to the **Score** tab to review your risk profile, then return to the Hub.")
-        st.page_link("Home.py", label="← Back to Hub")
+        if st.button("← Back to Hub"):
+            st.switch_page("pages/hub.py")
 
 
 # ===========================================================================
@@ -573,5 +578,4 @@ with tab_approach:
             },
         }
         _save_profile(updated)
-        st.success("Investment approach saved to profile.yaml.")
-        st.rerun()
+        st.switch_page("pages/hub.py")

@@ -25,12 +25,6 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 
-st.set_page_config(
-    page_title="Wealth Builder — Auri",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
 PROFILE_PATH  = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
@@ -889,11 +883,11 @@ def _profile_sidebar() -> dict:
 
 def _breadcrumb(current: str) -> None:
     pages = [
-        ("Hub",           "Home.py"),
-        ("Portfolio",     "pages/1_Portfolio.py"),
-        ("Analysis",      "pages/5_Analysis.py"),
+        ("Hub",           "/"),
+        ("Portfolio",     "/portfolio"),
+        ("Analysis",      "/analysis"),
         ("Wealth Builder",None),
-        ("Retirement",    "pages/7_Retirement.py"),
+        ("Retirement",    "/retirement"),
     ]
     parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
     st.caption("  ›  ".join(parts))

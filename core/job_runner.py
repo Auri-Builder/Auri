@@ -415,6 +415,32 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     )
     summary["accounts_loaded"] = accounts_loaded
 
+    # --- 6b. Owner-split account balances ---
+    # Reads accounts.yaml for owner fields and groups balances by (owner, account_type).
+    try:
+        _acct_yaml = yaml.safe_load(ACCOUNTS_MANIFEST_PATH.read_text()) if ACCOUNTS_MANIFEST_PATH.exists() else {}
+        _acct_meta = (_acct_yaml or {}).get("accounts", {})
+        _id_to_owner = {
+            str(m.get("account_id", "")).upper(): m.get("owner", "primary").lower()
+            for m in _acct_meta.values()
+            if m.get("account_id")
+        }
+        if _id_to_owner:
+            _by_owner: dict[str, dict[str, float]] = {}
+            for _row in all_rows:
+                _aid   = str(_row.get("account_id") or "").upper()
+                _owner = _id_to_owner.get(_aid, "primary")
+                _atype = (_row.get("account_type") or "UNCLASSIFIED").upper()
+                _mv    = float(_row.get("market_value") or 0.0)
+                _by_owner.setdefault(_owner, {})
+                _by_owner[_owner][_atype] = _by_owner[_owner].get(_atype, 0.0) + _mv
+            summary["account_balance_by_owner"] = {
+                o: {k: round(v, 2) for k, v in types.items() if v > 0}
+                for o, types in _by_owner.items()
+            }
+    except Exception:
+        pass
+
     # --- 7. Policy compliance check (optional — requires profile.yaml) ---
     # Loads the investor's stated constraints and flags breaches / warnings.
     # Non-fatal: if profile.yaml is absent, policy_flags is an empty list.

@@ -295,19 +295,17 @@ def _scenario_stress_test(summary: dict) -> None:
 
 def _breadcrumb(current: str) -> None:
     pages = [
-        ("Hub",           "Home.py"),
-        ("Portfolio",     "pages/1_Portfolio.py"),
+        ("Hub",           "/"),
+        ("Portfolio",     "/portfolio"),
         ("Analysis",      None),
-        ("Wealth Builder","pages/6_WealthBuilder.py"),
-        ("Retirement",    "pages/7_Retirement.py"),
+        ("Wealth Builder","/wealthbuilder"),
+        ("Retirement",    "/retirement"),
     ]
     parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
     st.caption("  ›  ".join(parts))
 
 
 def main() -> None:
-    st.set_page_config(page_title="Auri — Analysis", layout="wide")
-    from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
     st.title("Portfolio Analysis")
     _breadcrumb("Analysis")
 
