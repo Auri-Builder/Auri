@@ -30,6 +30,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
 PROFILE_PATH  = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"

@@ -54,6 +54,7 @@ st.set_page_config(
     page_icon="🏦",
     layout="wide",
 )
+from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 
 # ── Imports (lazy — keep startup fast) ───────────────────────────────────────
 try:

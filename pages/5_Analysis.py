@@ -307,6 +307,7 @@ def _breadcrumb(current: str) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Auri — Analysis", layout="wide")
+    from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
     st.title("Portfolio Analysis")
     _breadcrumb("Analysis")
 

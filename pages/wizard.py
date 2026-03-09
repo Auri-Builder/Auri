@@ -88,6 +88,7 @@ def _find_existing_by_account_id(account_id: str, accounts: dict) -> tuple[str, 
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Auri · Upload Wizard", layout="wide")
+from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Upload Wizard")
 st.caption("Add CSV portfolio exports · configure account metadata · local only · no network calls")
 
@@ -381,6 +382,84 @@ with st.expander("Set up personal profile", expanded=not _profile_configured):
             }
         save_shared_profile(_new_profile)
         st.success("Personal profile saved.")
+        st.rerun()
+
+# ── Wealth Builder Setup ────────────────────────────────────────────────────
+
+st.divider()
+st.subheader("Wealth Builder")
+st.caption(
+    "Savings and contribution room inputs for the RRSP/TFSA optimizer and FI projector. "
+    "Stored locally in **data/wealth/wealth_profile.yaml** (gitignored)."
+)
+
+_WB_PROFILE_PATH = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+
+def _load_wb_profile() -> dict:
+    if not _WB_PROFILE_PATH.exists():
+        return {}
+    try:
+        return yaml.safe_load(_WB_PROFILE_PATH.read_text()) or {}
+    except Exception:
+        return {}
+
+def _save_wb_profile(data: dict) -> None:
+    _WB_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_wb_profile()
+    existing.update(data)
+    _WB_PROFILE_PATH.write_text(
+        yaml.safe_dump(existing, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    )
+
+_wb = _load_wb_profile()
+_wb_fin = _wb.get("financials", {})
+_wb_configured = bool(_wb_fin.get("annual_savings") is not None or _wb_fin.get("rrsp_room") is not None)
+
+if _wb_configured:
+    st.success(
+        f"Wealth Builder configured: "
+        f"Annual savings ${_wb_fin.get('annual_savings', 0):,.0f} · "
+        f"RRSP room ${_wb_fin.get('rrsp_room_remaining', 0):,.0f} · "
+        f"TFSA room ${_wb_fin.get('tfsa_room_remaining', 0):,.0f}"
+    )
+
+with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
+    st.markdown("**Savings & Contribution Room**")
+    _wc1, _wc2, _wc3 = st.columns(3)
+    _wb_savings  = _wc1.number_input("Annual Savings ($)", min_value=0, max_value=500_000,
+                                      value=int(_wb_fin.get("annual_savings", 0)), step=500,
+                                      help="How much you plan to save and invest this year across all accounts.")
+    _wb_rrsp_rm  = _wc2.number_input("RRSP Room Remaining ($)", min_value=0, max_value=500_000,
+                                      value=int(_wb_fin.get("rrsp_room_remaining", _wb_fin.get("rrsp_room", 0))), step=1_000,
+                                      help="Check your CRA My Account or last Notice of Assessment.")
+    _wb_tfsa_rm  = _wc3.number_input("TFSA Room Remaining ($)", min_value=0, max_value=200_000,
+                                      value=int(_wb_fin.get("tfsa_room_remaining", _wb_fin.get("tfsa_room", 0))), step=500,
+                                      help="Check your CRA My Account. New room of $7,000 is added each January.")
+
+    st.markdown("**Growth Assumptions**")
+    _wc4, _wc5, _wc6 = st.columns(3)
+    _wb_return   = _wc4.number_input("Expected Annual Return (%)", min_value=0.0, max_value=20.0,
+                                      value=float(_wb_fin.get("growth_rate_pct", 6.0)), step=0.5,
+                                      help="Long-run portfolio return before inflation. 6% is a reasonable baseline.")
+    _wb_infl     = _wc5.number_input("Inflation (%)", min_value=0.0, max_value=10.0,
+                                      value=float(_wb_fin.get("inflation_pct", 2.5)), step=0.1)
+    _wb_ret_inc  = _wc6.number_input("Target Retirement Income ($/yr)", min_value=0, max_value=500_000,
+                                      value=int(_wb_fin.get("expected_retirement_income", 0)), step=1_000,
+                                      help="Annual income you want in retirement, in today's dollars.")
+
+    if st.button("Save Wealth Builder Setup", type="primary", key="wb_wizard_save"):
+        _wb_new_fin = {
+            "annual_savings":               float(_wb_savings),
+            "rrsp_room":                    float(_wb_rrsp_rm),   # key read by WB optimizer inputs
+            "rrsp_room_remaining":          float(_wb_rrsp_rm),   # key written by optimizer save
+            "tfsa_room":                    float(_wb_tfsa_rm),   # key read by WB optimizer inputs
+            "tfsa_room_remaining":          float(_wb_tfsa_rm),   # key written by optimizer save
+            "growth_rate_pct":              float(_wb_return),
+            "inflation_pct":                float(_wb_infl),
+            "expected_retirement_income":   float(_wb_ret_inc),
+        }
+        _save_wb_profile({"financials": _wb_new_fin})
+        st.success("Wealth Builder setup saved.")
         st.rerun()
 
 # ── AI Provider Configuration ──────────────────────────────────────────────

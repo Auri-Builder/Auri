@@ -169,6 +169,7 @@ def _fmt_score(v: float | None) -> str:
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Auri · Investor Profile", layout="wide")
+from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Investor Profile")
 
 # Breadcrumb

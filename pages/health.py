@@ -35,6 +35,7 @@ from agents.ori_ia.normalize import normalize_csv
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Auri · Health Checks", layout="wide")
+from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
 st.title("Health Checks")
 st.caption("Validates accounts.yaml + CSV files · read-only · no writes · no network calls")
 

@@ -85,6 +85,7 @@ def _breadcrumb(current: str) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Auri — Portfolio Dashboard", layout="wide")
+    from core.ui import hide_sidebar_nav; hide_sidebar_nav()  # noqa: E402
     st.title("Portfolio Dashboard")
     _breadcrumb("Portfolio")
     st.caption("Live prices · sector analysis · income tracking · offline by default")
