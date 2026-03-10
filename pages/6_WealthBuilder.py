@@ -1205,9 +1205,11 @@ def _tab_net_worth(profile: dict) -> None:
                 with col:
                     lv1, lv2 = st.columns([3, 2])
                     bal  = lv1.number_input(f"{label} ($)", min_value=0, max_value=5_000_000,
-                                             value=int(saved_l.get("balance", 0)), step=1_000)
+                                             value=int(saved_l.get("balance", 0)), step=1_000,
+                                             key=f"nw_liab_{key}_bal")
                     rate = lv2.number_input("Rate (%)", min_value=0.0, max_value=30.0,
-                                             value=float(saved_l.get("rate_pct", default_rate)), step=0.25)
+                                             value=float(saved_l.get("rate_pct", default_rate)), step=0.25,
+                                             key=f"nw_liab_{key}_rate")
                 liab_inputs.append({"label": label, "key": key, "balance": bal, "rate_pct": rate})
 
             col_calc, col_save = st.columns(2)
