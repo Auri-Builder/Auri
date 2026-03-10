@@ -1,167 +1,122 @@
-# Auri — Personal Investment Intelligence
+# Auri — Personal Financial Intelligence
 
-A governed, offline-first portfolio analytics system for self-hosted use.
-Ingests broker CSV exports, produces structured portfolio analysis, and
-generates profile-aware LLM commentary — with no cloud dependency by default.
+A local-first, AI-assisted financial planning app for Canadian investors.
+Upload your broker CSV exports, run retirement projections, build wealth plans,
+and get AI commentary — all from a desktop app with no cloud dependency by default.
 
----
-
-## What it does
-
-- Parses TD WebBroker CSV exports (and similar broker formats) into a canonical schema
-- Aggregates holdings across multiple accounts (TFSA, RRSP, CASH, RESP, etc.)
-- Computes sector weights, P&L, concentration flags, and account-type splits
-- Fetches live prices and dividend income from Yahoo Finance (on demand)
-- Generates LLM portfolio commentary via Ollama (local), Anthropic, OpenAI, or xAI
-- Maintains an investor risk profile and injects it into commentary prompts
-- Saves point-in-time snapshots for portfolio comparison over time
-- All via a Streamlit dashboard — no external services required in default mode
+> **Disclaimer:** Auri is a personal financial planning tool, not professional
+> financial advice. Always consult a qualified financial advisor before making
+> investment decisions.
 
 ---
 
-## Design principles
+## Features
 
-- **Offline by default** — no network calls unless explicitly requested
-- **Governed** — all actions go through an approval gate and job queue
-- **No raw data to LLM** — only whitelisted aggregates reach the AI layer
-- **Gitignored financials** — CSV files, profile, answers, and account manifests never committed
+- **Portfolio Dashboard** — Aggregates holdings across TFSA, RRSP, RRIF, CASH, and more
+- **Retirement Planner** — CPP/OAS/pension income, Monte Carlo projections, RRIF drawdown, tax estimates
+- **Wealth Builder** — Savings optimizer, portfolio projector, rebalancer, net worth tracker
+- **AI Commentary** — Profile-aware analysis via Groq (free), OpenAI, Anthropic, or xAI
+- **Snapshots** — Point-in-time portfolio captures for tracking progress over time
+- **Fully local** — your financial data never leaves your machine
 
----
-
-## Prerequisites
-
-- Python 3.12+
-- [Ollama](https://ollama.com) (optional — for local LLM commentary)
-- A broker that exports CSV holdings (tested with TD WebBroker)
+Tested with TD WebBroker CSV exports. Designed for Ontario-based investors (Canadian tax rules, RRIF minimums, 2026 brackets).
 
 ---
 
-## Setup
+## Getting started
+
+### Option A — Windows single-file app (easiest)
+
+Download `auri.exe` from the [Releases](https://github.com/Auri-Builder/Auri/releases) page, double-click, and follow the setup wizard.
+
+See [INSTALL.md](INSTALL.md) for first-run instructions and troubleshooting.
+
+### Option B — Run from source (Python 3.12+)
 
 ```bash
-git clone https://github.com/your-username/auri.git
-cd auri
+git clone https://github.com/Auri-Builder/Auri.git
+cd Auri
 python3 -m venv env
-source env/bin/activate
-pip install -r requirements-dev.txt
-```
-
----
-
-## Configuration
-
-### 1. accounts.yaml (required)
-
-Create `data/portfolio/accounts.yaml` to declare your CSV files:
-
-```yaml
-accounts:
-  holdings.csv:
-    account_id:   "ACCT-001"
-    account_name: "My TFSA"
-    account_type: "TFSA"          # TFSA | RRSP | RRIF | RESP | CASH | USD_CASH
-    institution:  "TD"
-    currency:     "CAD"
-```
-
-This file is gitignored and will never be committed.
-
-### 2. Place your CSV exports
-
-```
-data/portfolio/holdings.csv
-data/portfolio/rrsp.csv    # additional accounts as needed
-```
-
-All `*.csv` files in `data/portfolio/` are gitignored.
-
-### 3. (Optional) LLM commentary
-
-For local Ollama (default — no API key needed):
-```bash
-ollama pull llama3.2
-```
-
-For a cloud provider, create `llm_config.yaml` (gitignored):
-```yaml
-provider: cloud
-cloud:
-  provider: anthropic   # anthropic | openai | xai
-  model: claude-haiku-4-5-20251001
-```
-
-Then export your API key before starting the app:
-```bash
-export ANTHROPIC_API_KEY=sk-...
-```
-
----
-
-## Running the dashboard
-
-**Dev mode** (no job runner needed) — create `dashboard.yaml` at the repo root:
-```yaml
-dev_direct_call: true
-```
-
-Then start the app:
-```bash
-source env/bin/activate
-python -m streamlit run Home.py
+source env/bin/activate          # Windows: env\Scripts\activate
+pip install -r requirements.txt
+streamlit run Home.py
 ```
 
 Opens at `http://localhost:8501`.
 
-**Governed mode** (default) — run the job runner in a separate terminal:
-```bash
-python -m core.job_runner
-```
+---
 
-Then start the app without `dashboard.yaml`.
+## AI provider setup
+
+Auri works without an AI key (portfolio data and projections run fully offline).
+AI commentary requires one free API key:
+
+**Groq (recommended — free tier)**
+1. Sign up at [console.groq.com](https://console.groq.com)
+2. Create an API key
+3. Enter it in the Wizard → AI Provider tab inside the app
+
+Other supported providers: OpenAI, Anthropic (Claude), xAI (Grok).
 
 ---
 
-## Investor profile
+## First-time setup
 
-The risk-profiling questionnaire is at `data/portfolio/questions.yaml`.
-Answer it via the Profile page in the dashboard, or by creating
-`data/portfolio/answers.yaml` directly (gitignored).
+1. Launch the app and complete the **Setup Wizard** (sidebar → Wizard)
+2. Export your holdings CSV from your broker and upload it in the wizard
+3. Fill in your investor profile and retirement details
+4. Return to the **Hub** to access Portfolio, Wealth Builder, and Retirement Planner
 
-The profile drives:
-- A deterministic risk score (0–100)
-- Profile-aware LLM commentary (goals, constraints, retirement context, income coverage)
+See [docs/profile_data_guide.md](docs/profile_data_guide.md) for a data collection checklist
+(useful to fill out before your first session, or to share with your financial advisor).
 
 ---
 
-## Security
+## Data & privacy
 
-- CSV files and personal data are confined to `data/portfolio/` and gitignored
-- Path traversal outside the project root is denied at the job runner level
-- The LLM receives only whitelisted aggregate fields — no account identifiers,
-  file paths, or institution names
-- See [SECURITY_NOTES.md](SECURITY_NOTES.md) for full hardening notes
+- All personal data (CSV files, profiles, answers) is stored locally and gitignored
+- The AI layer receives only whitelisted aggregate fields — no account numbers,
+  institution names, or raw transaction data
+- See [SECURITY_NOTES.md](SECURITY_NOTES.md) for full details
 
 ---
 
 ## Project structure
 
 ```
-agents/ori_ia/      Analytics, normalization, enrichment, LLM adapter
-core/               Job runner, job queue, CLI
-data/portfolio/     CSV exports + manifest (gitignored)
-data/derived/       Saved snapshots (gitignored)
-docs/               Architecture and specification documents
-pages/              Streamlit pages (wizard, health, snapshots, profile)
-refs/symbols.yaml   Symbol reference data (sector, asset class, Yahoo ticker overrides)
+agents/ori_ia/      Portfolio analytics, market data, LLM commentary
+agents/ori_rp/      Retirement planner (CPP/OAS, cashflow, Monte Carlo, tax)
+agents/ori_wb/      Wealth Builder (optimizer, projector, rebalancer, net worth)
+core/               Job runner, caching, shared utilities
+pages/              Streamlit pages (hub, portfolio, retirement, wealth builder, wizard, ...)
+refs/               Tax tables, RRIF minimums, symbol reference data
+docs/               Architecture notes, advisor data guide
 tests/              Pytest test suite
-app.py              Streamlit dashboard entry point
+Home.py             App entry point
+run.py              PyInstaller entry point (exe builds)
 ```
 
 ---
 
-## Running tests
+## Building the Windows exe
 
-```bash
-source env/bin/activate
-python -m pytest
+Requires Windows + Python 3.12 + `pip install pyinstaller==6.13.0`.
+
+```bat
+build.bat
 ```
+
+Output: `dist\auri.exe` (~150–200 MB single file).
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## Contributing / feedback
+
+This project is in active personal use. Issues and PRs welcome.
+If you find it useful, a GitHub star is appreciated.

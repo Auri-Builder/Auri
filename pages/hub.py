@@ -17,7 +17,7 @@ from pathlib import Path
 
 import streamlit as st
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ def _card(title: str, icon: str, lines: list[tuple[str, str]], link_page: str, l
 def _portfolio_status() -> dict:
     """Read cached summary if available; otherwise return empty."""
     # If accounts.yaml is gone, invalidate cache immediately so hub shows clean state
-    _accounts_file = PROJECT_ROOT / "data" / "portfolio" / "accounts.yaml"
+    _accounts_file = DATA_ROOT / "data" / "portfolio" / "accounts.yaml"
     if not _accounts_file.exists():
         try:
             from core.dashboard_cache import load_summary  # noqa: PLC0415
@@ -72,7 +72,7 @@ def _portfolio_status() -> dict:
 
 def _has_risk_profile() -> bool:
     """Return True if the investor questionnaire has been scored."""
-    profile_path = PROJECT_ROOT / "data" / "portfolio" / "profile.yaml"
+    profile_path = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
     if not profile_path.exists():
         return False
     try:
@@ -85,7 +85,7 @@ def _has_risk_profile() -> bool:
 
 def _retirement_status() -> dict:
     """Read retirement profile + compute readiness score (quick deterministic run)."""
-    profile_path = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    profile_path = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
     if not profile_path.exists():
         return {}
     try:
@@ -138,11 +138,12 @@ def _retirement_status() -> dict:
             sp_oas_start_age    = int(spouse_d.get("oas_start_age", 65)) if spouse_d else 0,
         )
         return {
-            "score":       readiness["score"],
-            "label":       readiness["label"],
-            "portfolio":   readiness["total_portfolio"],
-            "guaranteed":  readiness["guaranteed_annual"],
-            "has_spouse":  spouse_d is not None,
+            "score":          readiness["score"],
+            "label":          readiness["label"],
+            "portfolio":      readiness["total_portfolio"],
+            "guaranteed":     readiness["guaranteed_annual"],
+            "annual_spending": float(spending.get("annual_target", 0)),
+            "has_spouse":     spouse_d is not None,
         }
     except Exception:
         return {}
@@ -150,7 +151,7 @@ def _retirement_status() -> dict:
 
 def _wealth_status() -> dict:
     """Read wealth builder profile + run quick FI projection if data available."""
-    profile_path = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    profile_path = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
     if not profile_path.exists():
         return {}
     try:
@@ -165,10 +166,23 @@ def _wealth_status() -> dict:
         if not current_age or not ret_age:
             return {}
 
-        # Net worth from saved balance sheet
-        total_assets = sum(float(a.get("value", 0)) for a in nw.get("assets", []))
-        total_liab   = sum(float(l.get("balance", 0)) for l in nw.get("liabilities", []))
-        net_worth    = total_assets - total_liab if total_assets else None
+        # Net worth from saved balance sheet — handle both legacy (flat assets list)
+        # and new spouse-split format (primary/spouse/joint dicts + liabilities list)
+        if "assets" in nw:
+            # Legacy flat format
+            total_assets = sum(float(a.get("value", 0)) for a in nw.get("assets", []))
+            total_liab   = sum(float(l.get("balance", 0)) for l in nw.get("liabilities", []))
+        else:
+            # New spouse-split format: primary/spouse/joint dicts + liabilities list
+            def _sum_dict(d: dict) -> float:
+                return sum(float(v) for v in d.values() if isinstance(v, (int, float)))
+            total_assets = (
+                _sum_dict(nw.get("primary", {})) +
+                _sum_dict(nw.get("spouse", {})) +
+                _sum_dict(nw.get("joint", {}))
+            )
+            total_liab = sum(float(l.get("balance", 0)) for l in nw.get("liabilities", []))
+        net_worth = total_assets - total_liab if total_assets else None
 
         # Quick FI projection using saved profile values
         fi_age = None
@@ -265,17 +279,29 @@ def _build_brief_html(
     # ── Portfolio section ─────────────────────────────────────────────────
     port_rows = ""
     for p in portfolio.get("positions_summary", [])[:20]:
-        sym = p.get("symbol", "—")
-        desc = p.get("description", "")[:40]
+        sym  = p.get("symbol", "—")
+        desc = (p.get("security_name") or p.get("description") or "")[:40]
         mv   = float(p.get("market_value") or 0)
-        acct = p.get("account_type", "")
-        port_rows += f"<tr><td>{sym}</td><td>{desc}</td><td>{acct}</td><td class='num'>{_fmt_cad(mv)}</td></tr>"
+        sect = p.get("sector") or p.get("asset_class") or ""
+        port_rows += f"<tr><td>{sym}</td><td>{desc}</td><td>{sect}</td><td class='num'>{_fmt_cad(mv)}</td></tr>"
 
     _sw = portfolio.get("sector_weights_pct", {})
     sector_rows = "".join(
         f"<tr><td>{s}</td><td class='num'>{w:.1f}%</td></tr>"
         for s, w in sorted(_sw.items(), key=lambda x: -x[1])
     )
+
+    # Account balances by owner
+    _abo = portfolio.get("account_balance_by_owner", {})
+    acct_rows = ""
+    for owner, accts in _abo.items():
+        for acct_type, bal in accts.items():
+            acct_rows += f"<tr><td>{owner.capitalize()} — {acct_type}</td><td class='num'>{_fmt_cad(float(bal))}</td></tr>"
+
+    # Unrealized gain if available
+    _ug = portfolio.get("total_unrealized_gain")
+    _ugp = portfolio.get("total_unrealized_gain_pct")
+    ug_line = f"<tr><td>Unrealized Gain</td><td>{_fmt_cad(_ug)} ({_ugp:.1f}%)</td></tr>" if _ug is not None and _ugp is not None else ""
 
     # ── Wealth Builder section ─────────────────────────────────────────────
     fi_line = ""
@@ -296,6 +322,7 @@ def _build_brief_html(
             <tr><td>Readiness Score</td><td>{retirement['score']:.0f} / 100 — {retirement['label']}</td></tr>
             <tr><td>Retirement Assets</td><td>{_fmt_cad(retirement['portfolio'])}</td></tr>
             <tr><td>Guaranteed Income</td><td>{_fmt_cad(retirement['guaranteed'])}/yr (CPP + OAS + pension)</td></tr>
+            {'<tr><td>Annual Spending Target</td><td>' + _fmt_cad(retirement['annual_spending']) + '/yr</td></tr>' if retirement.get('annual_spending') else ''}
             {'<tr><td>Plan Type</td><td>Household (primary + spouse)</td></tr>' if retirement.get('has_spouse') else ''}
         </table>"""
 
@@ -326,9 +353,11 @@ def _build_brief_html(
 <table>
   <tr><td>Total Value</td><td>{_fmt_cad(portfolio.get("total_market_value", 0))}</td></tr>
   <tr><td>Positions</td><td>{portfolio.get("position_count", 0)}</td></tr>
+  {ug_line}
 </table>
+{'<h3 style="margin-top:16px;font-size:1em;">Account Balances by Owner</h3><table><tr><th>Account</th><th class=num>Balance</th></tr>' + acct_rows + '</table>' if acct_rows else ''}
 {'<h3 style="margin-top:16px;font-size:1em;">Sector Weights</h3><table><tr><th>Sector</th><th class=num>Weight</th></tr>' + sector_rows + '</table>' if sector_rows else ''}
-{'<h3 style="margin-top:16px;font-size:1em;">Holdings</h3><table><tr><th>Symbol</th><th>Description</th><th>Account</th><th class=num>Market Value</th></tr>' + port_rows + '</table>' if port_rows else ''}
+{'<h3 style="margin-top:16px;font-size:1em;">Holdings</h3><table><tr><th>Symbol</th><th>Security</th><th>Sector</th><th class=num>Market Value</th></tr>' + port_rows + '</table>' if port_rows else ''}
 
 <h2>Wealth Builder</h2>
 <table>
@@ -363,14 +392,14 @@ def main() -> None:
     st.caption("Personal financial intelligence · local-first · your data never leaves your machine")
 
     # ── Setup banner (only shown until all steps complete) ────────────────
-    _profile_path  = PROJECT_ROOT / "data" / "portfolio" / "profile.yaml"
-    _targets_path  = PROJECT_ROOT / "data" / "portfolio" / "targets.yaml"
-    _accounts_path = PROJECT_ROOT / "data" / "portfolio" / "accounts.yaml"
-    _ret_path      = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    _profile_path  = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
+    _targets_path  = DATA_ROOT / "data" / "portfolio" / "targets.yaml"
+    _accounts_path = DATA_ROOT / "data" / "portfolio" / "accounts.yaml"
+    _ret_path      = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
     _ai_ok         = bool(_ai_status())
 
-    _wealth_path  = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
-    _shared_path  = PROJECT_ROOT / "data" / "shared_profile.yaml"
+    _wealth_path  = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    _shared_path  = DATA_ROOT / "data" / "shared_profile.yaml"
     _steps = [
         (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",           "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",         "pages/wizard.py",           "Configure in Upload Wizard →"),
@@ -561,7 +590,7 @@ def main() -> None:
     _brief_portfolio  = bool(portfolio)
     _brief_wealth     = bool(wealth)
     _brief_retirement = bool(retirement)
-    _brief_commentary_path = PROJECT_ROOT / "data" / "derived" / "commentary_latest.json"
+    _brief_commentary_path = DATA_ROOT / "data" / "derived" / "commentary_latest.json"
     _brief_commentary = _brief_commentary_path.exists()
     _can_generate     = _brief_portfolio and _brief_wealth
 

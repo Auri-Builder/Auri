@@ -11,7 +11,7 @@ from pathlib import Path
 import streamlit as st
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from core._paths import PROJECT_ROOT  # noqa: F401
 DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 

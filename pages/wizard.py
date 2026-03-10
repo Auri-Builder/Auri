@@ -18,8 +18,8 @@ import yaml
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PORTFOLIO_DIR = PROJECT_ROOT / "data" / "portfolio"
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+PORTFOLIO_DIR = DATA_ROOT / "data" / "portfolio"
 ACCOUNTS_YAML_PATH = PORTFOLIO_DIR / "accounts.yaml"
 
 # ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ st.caption(
     "Stored locally in **data/wealth/wealth_profile.yaml** (gitignored)."
 )
 
-_WB_PROFILE_PATH = PROJECT_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+_WB_PROFILE_PATH = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
 
 def _load_wb_profile() -> dict:
     if not _WB_PROFILE_PATH.exists():
@@ -417,54 +417,102 @@ def _save_wb_profile(data: dict) -> None:
         yaml.safe_dump(existing, default_flow_style=False, allow_unicode=True, sort_keys=False)
     )
 
-_wb = _load_wb_profile()
-_wb_fin = _wb.get("financials", {})
+_wb        = _load_wb_profile()
+_wb_fin    = _wb.get("financials", {})
+_wb_sp_fin = _wb.get("spouse", {}).get("financials", {})
+
+# Detect spouse from shared profile (name set = has spouse)
+_has_spouse    = bool(_sp_spouse and (_sp_spouse or {}).get("name"))
+_sp_name_label = (_sp_spouse or {}).get("name", "Spouse") if _has_spouse else "Spouse"
+
 _wb_configured = bool(_wb_fin.get("annual_savings") is not None or _wb_fin.get("rrsp_room") is not None)
 
 if _wb_configured:
+    _spouse_note = (
+        f" · {_sp_name_label}: RRSP ${_wb_sp_fin.get('rrsp_room_remaining', 0):,.0f}"
+        if _has_spouse and _wb_sp_fin else ""
+    )
     st.success(
         f"Wealth Builder configured: "
         f"Annual savings ${_wb_fin.get('annual_savings', 0):,.0f} · "
         f"RRSP room ${_wb_fin.get('rrsp_room_remaining', 0):,.0f} · "
         f"TFSA room ${_wb_fin.get('tfsa_room_remaining', 0):,.0f}"
+        f"{_spouse_note}"
     )
 
 with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
-    st.markdown("**Savings & Contribution Room**")
-    _wc1, _wc2, _wc3 = st.columns(3)
-    _wb_savings  = _wc1.number_input("Annual Savings ($)", min_value=0, max_value=500_000,
-                                      value=int(_wb_fin.get("annual_savings", 0)), step=500,
-                                      help="How much you plan to save and invest this year across all accounts.")
-    _wb_rrsp_rm  = _wc2.number_input("RRSP Room Remaining ($)", min_value=0, max_value=500_000,
-                                      value=int(_wb_fin.get("rrsp_room_remaining", _wb_fin.get("rrsp_room", 0))), step=1_000,
-                                      help="Check your CRA My Account or last Notice of Assessment.")
-    _wb_tfsa_rm  = _wc3.number_input("TFSA Room Remaining ($)", min_value=0, max_value=200_000,
-                                      value=int(_wb_fin.get("tfsa_room_remaining", _wb_fin.get("tfsa_room", 0))), step=500,
-                                      help="Check your CRA My Account. New room of $7,000 is added each January.")
+    st.markdown("**Primary — Savings & Contribution Room**")
+    _wc1, _wc2, _wc3, _wc4 = st.columns(4)
+    _wb_savings      = _wc1.number_input("Annual Savings ($)", min_value=0, max_value=500_000,
+                                          value=int(_wb_fin.get("annual_savings", 0)), step=500,
+                                          help="How much you plan to save and invest this year across all accounts.")
+    _wb_savings_rate = _wc2.number_input("Savings Rate (% of income)", min_value=0.0, max_value=80.0,
+                                          value=float(_wb_fin.get("savings_rate_pct", 20.0)), step=1.0,
+                                          help="Used by the Savings Projector. E.g. 20 = save 20% of gross income.")
+    _wb_rrsp_rm      = _wc3.number_input("RRSP Room Remaining ($)", min_value=0, max_value=500_000,
+                                          value=int(_wb_fin.get("rrsp_room_remaining", _wb_fin.get("rrsp_room", 0))), step=1_000,
+                                          help="Check your CRA My Account or last Notice of Assessment.")
+    _wb_tfsa_rm      = _wc4.number_input("TFSA Room Remaining ($)", min_value=0, max_value=200_000,
+                                          value=int(_wb_fin.get("tfsa_room_remaining", _wb_fin.get("tfsa_room", 0))), step=500,
+                                          help="Check your CRA My Account. New room of $7,000 is added each January.")
 
-    st.markdown("**Growth Assumptions**")
-    _wc4, _wc5, _wc6 = st.columns(3)
-    _wb_return   = _wc4.number_input("Expected Annual Return (%)", min_value=0.0, max_value=20.0,
+    if _has_spouse:
+        st.markdown(f"**{_sp_name_label} — Savings & Contribution Room**")
+        _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+        _wb_sp_savings      = _sc1.number_input(f"{_sp_name_label} Annual Savings ($)", min_value=0, max_value=500_000,
+                                                  value=int(_wb_sp_fin.get("annual_savings", 0)), step=500)
+        _wb_sp_savings_rate = _sc2.number_input(f"{_sp_name_label} Savings Rate (%)", min_value=0.0, max_value=80.0,
+                                                  value=float(_wb_sp_fin.get("savings_rate_pct", 0.0)), step=1.0)
+        _wb_sp_rrsp_rm      = _sc3.number_input(f"{_sp_name_label} RRSP Room ($)", min_value=0, max_value=500_000,
+                                                  value=int(_wb_sp_fin.get("rrsp_room_remaining", _wb_sp_fin.get("rrsp_room", 0))), step=1_000,
+                                                  help="Check CRA My Account or last NOA.")
+        _wb_sp_tfsa_rm      = _sc4.number_input(f"{_sp_name_label} TFSA Room ($)", min_value=0, max_value=200_000,
+                                                  value=int(_wb_sp_fin.get("tfsa_room_remaining", _wb_sp_fin.get("tfsa_room", 0))), step=500,
+                                                  help="Check CRA My Account.")
+
+    st.markdown("**Growth Assumptions** *(shared)*")
+    _wc5, _wc6, _wc7 = st.columns(3)
+    _wb_return   = _wc5.number_input("Expected Annual Return (%)", min_value=0.0, max_value=20.0,
                                       value=float(_wb_fin.get("growth_rate_pct", 6.0)), step=0.5,
                                       help="Long-run portfolio return before inflation. 6% is a reasonable baseline.")
-    _wb_infl     = _wc5.number_input("Inflation (%)", min_value=0.0, max_value=10.0,
+    _wb_infl     = _wc6.number_input("Inflation (%)", min_value=0.0, max_value=10.0,
                                       value=float(_wb_fin.get("inflation_pct", 2.5)), step=0.1)
-    _wb_ret_inc  = _wc6.number_input("Target Retirement Income ($/yr)", min_value=0, max_value=500_000,
+    _wb_ret_inc  = _wc7.number_input("Target Retirement Income ($/yr)", min_value=0, max_value=500_000,
                                       value=int(_wb_fin.get("expected_retirement_income", 0)), step=1_000,
                                       help="Annual income you want in retirement, in today's dollars.")
 
     if st.button("Save Wealth Builder Setup", type="primary", key="wb_wizard_save"):
         _wb_new_fin = {
             "annual_savings":               float(_wb_savings),
-            "rrsp_room":                    float(_wb_rrsp_rm),   # key read by WB optimizer inputs
-            "rrsp_room_remaining":          float(_wb_rrsp_rm),   # key written by optimizer save
-            "tfsa_room":                    float(_wb_tfsa_rm),   # key read by WB optimizer inputs
-            "tfsa_room_remaining":          float(_wb_tfsa_rm),   # key written by optimizer save
+            "savings_rate_pct":             float(_wb_savings_rate),
+            "rrsp_room":                    float(_wb_rrsp_rm),
+            "rrsp_room_remaining":          float(_wb_rrsp_rm),
+            "tfsa_room":                    float(_wb_tfsa_rm),
+            "tfsa_room_remaining":          float(_wb_tfsa_rm),
             "growth_rate_pct":              float(_wb_return),
             "inflation_pct":                float(_wb_infl),
             "expected_retirement_income":   float(_wb_ret_inc),
         }
-        _save_wb_profile({"financials": _wb_new_fin})
+        # Preserve all non-financials/spouse keys (preferences etc.)
+        _current = _load_wb_profile()
+        _current["financials"] = _wb_new_fin
+        if _has_spouse:
+            _current.setdefault("spouse", {})["financials"] = {
+                "annual_savings":      float(_wb_sp_savings),
+                "savings_rate_pct":    float(_wb_sp_savings_rate),
+                "rrsp_room":           float(_wb_sp_rrsp_rm),
+                "rrsp_room_remaining": float(_wb_sp_rrsp_rm),
+                "tfsa_room":           float(_wb_sp_tfsa_rm),
+                "tfsa_room_remaining": float(_wb_sp_tfsa_rm),
+                "growth_rate_pct":     float(_wb_return),
+                "inflation_pct":       float(_wb_infl),
+            }
+        else:
+            _current.pop("spouse", None)
+        _WB_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _WB_PROFILE_PATH.write_text(
+            yaml.safe_dump(_current, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        )
         st.success("Wealth Builder setup saved.")
         st.rerun()
 

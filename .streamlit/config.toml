@@ -6,8 +6,16 @@ secondaryBackgroundColor = "#F2F5F9" # Light blue-grey — sidebar, forms, expan
 textColor              = "#1A1A1A"   # Near-black body text
 font                   = "sans serif"
 
+[general]
+email = ""
+
+[browser]
+gatherUsageStats = false
+
 [server]
 # Bind to all interfaces for LAN access.
 # Restrict access via firewall (e.g. ufw allow from <your-LAN-subnet> to any port 8501).
 address = "0.0.0.0"
 headless = true
+enableCORS = false
+enableXsrfProtection = false

@@ -34,9 +34,9 @@ import streamlit as st
 logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT   = Path(__file__).parent.parent
-PROFILE_PATH   = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
-SCENARIOS_DIR  = PROJECT_ROOT / "data" / "retirement" / "scenarios"
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+PROFILE_PATH   = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+SCENARIOS_DIR  = DATA_ROOT / "data" / "retirement" / "scenarios"
 REFS_DIR       = PROJECT_ROOT / "refs" / "retirement"
 
 _DISCLAIMER = (
@@ -74,6 +74,14 @@ def _load_profile() -> dict | None:
         return None
     with PROFILE_PATH.open() as f:
         return yaml.safe_load(f)
+
+
+def _save_profile(profile: dict) -> None:
+    if not _YAML:
+        return
+    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with PROFILE_PATH.open("w") as f:
+        yaml.dump(profile, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 def _save_scenario(scenario_dict: dict, scenario_name: str) -> Path:
@@ -833,6 +841,18 @@ def _profile_form() -> dict | None:
 
     # ── Pull defaults from shared profile + portfolio CSV ─────────────────
     try:
+        _rp     = _load_profile() or {}
+        _rp_pri = _rp.get("household", {}).get("primary", {})
+        _rp_sps = _rp.get("household", {}).get("spouse", {})
+        _cpp_mo_def      = float(_rp_pri.get("cpp_monthly_at_65", 1200.0))
+        _cpp_start_def   = int(_rp_pri.get("cpp_start_age", 65))
+        _oas_mo_def      = float(_rp_pri.get("oas_monthly_at_65", 700.0))
+        _oas_start_def   = int(_rp_pri.get("oas_start_age", 65))
+        _sp_cpp_mo_def   = float(_rp_sps.get("cpp_monthly_at_65", 900.0))
+        _sp_cpp_start_def= int(_rp_sps.get("cpp_start_age", 65))
+        _sp_oas_mo_def   = float(_rp_sps.get("oas_monthly_at_65", 650.0))
+        _sp_oas_start_def= int(_rp_sps.get("oas_start_age", 65))
+
         from core.shared_profile import load_shared_profile, get_account_balances, get_account_balances_by_owner  # noqa: PLC0415
         _sp      = load_shared_profile()
         _sp_p    = _sp.get("primary", {})
@@ -875,6 +895,10 @@ def _profile_form() -> dict | None:
         _rrsp_bal = 0.0; _tfsa_bal = 0.0; _non_reg_bal = 0.0
         _sp_rrsp_bal = 0.0; _sp_tfsa_bal = 0.0; _sp_non_bal = 0.0
         _has_sp_def = False; _sp_age_def = 55
+        _cpp_mo_def = 1200.0; _cpp_start_def = 65
+        _oas_mo_def = 700.0;  _oas_start_def = 65
+        _sp_cpp_mo_def = 900.0; _sp_cpp_start_def = 65
+        _sp_oas_mo_def = 650.0; _sp_oas_start_def = 65
 
 
     # has_spouse OUTSIDE the form so toggling it immediately shows/hides spouse fields
@@ -883,6 +907,21 @@ def _profile_form() -> dict | None:
         "Add spouse / common-law partner",
         value=_has_sp_def,
         key="rp_has_spouse",
+    )
+
+    # CPP input mode toggle — outside form so selecting it rerenders the form immediately
+    _CPP_MODE_65    = "My age-65 amount (from My Service Canada)"
+    _CPP_MODE_ACTUAL = "My actual amount at my CPP start age"
+    cpp_input_mode = st.radio(
+        "CPP input format:",
+        [_CPP_MODE_65, _CPP_MODE_ACTUAL],
+        horizontal=True,
+        key="rp_cpp_input_mode",
+        help=(
+            "**Age-65 amount**: Use the projected monthly benefit from your My Service Canada account. "
+            "**Actual amount at start age**: Enter what you'll actually receive at your chosen start age "
+            "(e.g. $768/mo at 60) — Auri back-calculates the age-65 equivalent automatically."
+        ),
     )
 
     _PROV_OPTIONS = ["ON", "BC", "AB", "QC", "MB", "SK", "NS", "NB", "PE", "NL"]
@@ -898,11 +937,24 @@ def _profile_form() -> dict | None:
         province   = c3.selectbox("Province", _PROV_OPTIONS, index=_prov_idx)
 
         c4, c5, c6, c7 = st.columns(4)
-        cpp_mo        = c4.number_input("CPP at 65 ($/mo)",         min_value=0.0, max_value=1400.0, value=1200.0, step=50.0)
-        cpp_start     = c5.number_input("CPP Start Age",            min_value=60,  max_value=70,     value=65,     step=1,
+        if cpp_input_mode == _CPP_MODE_65:
+            cpp_mo     = c4.number_input("CPP at 65 ($/mo)",       min_value=0.0, max_value=1400.0, value=_cpp_mo_def,    step=50.0,
+                                         help="Your projected monthly CPP at age 65, from My Service Canada.")
+            cpp_direct = None
+        else:
+            try:
+                from agents.ori_rp.cpp_oas import cpp_monthly_benefit as _cmb  # noqa: PLC0415
+                _direct_default = round(_cpp_mo_def * _cmb(1.0, _cpp_start_def), 0)
+            except Exception:
+                _direct_default = round(_cpp_mo_def * 0.64, 0)
+            cpp_direct = c4.number_input("CPP at start age ($/mo)", min_value=0.0, max_value=1400.0, value=_direct_default, step=25.0,
+                                         help="The actual monthly CPP you'll receive at your chosen start age. "
+                                              "Auri converts this to the age-65 equivalent using the standard actuarial factor.")
+            cpp_mo = 0.0  # replaced after submit
+        cpp_start     = c5.number_input("CPP Start Age",            min_value=60,  max_value=70,     value=_cpp_start_def, step=1,
                                         help="Age you plan to start CPP (60–70). Deferring past 65 increases benefit by 0.7%/month.")
-        oas_mo        = c6.number_input("OAS at 65 ($/mo)",         min_value=0.0, max_value=800.0,  value=700.0,  step=10.0)
-        oas_start     = c7.number_input("OAS Start Age",            min_value=65,  max_value=70,     value=65,     step=1,
+        oas_mo        = c6.number_input("OAS at 65 ($/mo)",         min_value=0.0, max_value=800.0,  value=_oas_mo_def,    step=10.0)
+        oas_start     = c7.number_input("OAS Start Age",            min_value=65,  max_value=70,     value=_oas_start_def, step=1,
                                         help="Age you plan to start OAS (65–70). Deferring past 65 increases benefit by 0.6%/month.")
 
         c8, c9, c10, c11 = st.columns(4)
@@ -996,11 +1048,11 @@ def _profile_form() -> dict | None:
                                              help="Spouse's annual employment income until their retirement age. Reduces portfolio draw.")
 
             cs4, cs5, cs6, cs7 = st.columns(4)
-            sp_cpp        = cs4.number_input("Spouse CPP at 65 ($/mo)", min_value=0.0, max_value=1400.0, value=900.0,  step=50.0)
-            sp_cpp_start  = cs5.number_input("Spouse CPP Start Age",    min_value=60,  max_value=70,     value=65,     step=1,
+            sp_cpp        = cs4.number_input("Spouse CPP at 65 ($/mo)", min_value=0.0, max_value=1400.0, value=_sp_cpp_mo_def,    step=50.0)
+            sp_cpp_start  = cs5.number_input("Spouse CPP Start Age",    min_value=60,  max_value=70,     value=_sp_cpp_start_def, step=1,
                                              help="Age spouse plans to start CPP.")
-            sp_oas        = cs6.number_input("Spouse OAS at 65 ($/mo)", min_value=0.0, max_value=800.0,  value=650.0,  step=10.0)
-            sp_oas_start  = cs7.number_input("Spouse OAS Start Age",    min_value=65,  max_value=70,     value=65,     step=1,
+            sp_oas        = cs6.number_input("Spouse OAS at 65 ($/mo)", min_value=0.0, max_value=800.0,  value=_sp_oas_mo_def,    step=10.0)
+            sp_oas_start  = cs7.number_input("Spouse OAS Start Age",    min_value=65,  max_value=70,     value=_sp_oas_start_def, step=1,
                                              help="Age spouse plans to start OAS.")
 
             cs8, cs9, cs10, cs11 = st.columns(4)
@@ -1042,6 +1094,15 @@ def _profile_form() -> dict | None:
 
     if not submitted:
         return None
+
+    # Back-calculate age-65 CPP if user entered their actual start-age amount
+    if cpp_input_mode == _CPP_MODE_ACTUAL and cpp_direct is not None:
+        try:
+            from agents.ori_rp.cpp_oas import cpp_monthly_benefit  # noqa: PLC0415
+            _factor = cpp_monthly_benefit(1.0, int(cpp_start))
+            cpp_mo  = round(cpp_direct / _factor, 2) if _factor > 0 else cpp_direct
+        except Exception:
+            cpp_mo = cpp_direct  # fallback: use as-is
 
     # Persist province so the selectbox remembers it on the next render
     st.session_state["rp_province"] = province
@@ -1110,24 +1171,18 @@ def main():
     # ── Load profile (from file if it exists, else form) ──────────────────
     file_profile = _load_profile()
     if file_profile:
-        st.success(
-            f"Loaded profile from `{PROFILE_PATH.relative_to(PROJECT_ROOT)}`. "
-            "Edit the file to update your details, or use the form below to override."
-        )
-        with st.expander("Override profile with form inputs", expanded=False):
+        with st.expander("Edit profile", expanded=False):
             form_profile = _profile_form()
     else:
-        st.info(
-            f"No `retirement_profile.yaml` found at `{PROFILE_PATH}`. "
-            "Enter your details below to get started. "
-            "Save the file to `data/retirement/retirement_profile.yaml` to persist between sessions."
-        )
+        st.info("Enter your details below. Your profile is saved automatically when you run a projection.")
         form_profile = _profile_form()
 
     # Persist last-run profile in session state so widget interactions
     # (selectbox changes, tab clicks, etc.) don't reset the whole page.
     if form_profile is not None:
         st.session_state["last_profile"] = form_profile
+        _save_profile(form_profile)
+        st.rerun()  # collapse the form expander immediately
 
     profile = form_profile or file_profile or st.session_state.get("last_profile")
 

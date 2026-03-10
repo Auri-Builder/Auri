@@ -32,8 +32,8 @@ from typing import Any
 
 import yaml
 
-_PROJECT_ROOT  = Path(__file__).resolve().parent.parent
-PROFILE_PATH   = _PROJECT_ROOT / "data" / "shared_profile.yaml"
+from core._paths import PROJECT_ROOT as _PROJECT_ROOT, DATA_ROOT as _DATA_ROOT  # noqa: F401
+PROFILE_PATH   = _DATA_ROOT / "data" / "shared_profile.yaml"
 
 # Provinces supported by the tax engine
 PROVINCES = ["BC", "AB", "ON", "QC", "SK", "MB", "NS", "NB", "PE", "NL"]

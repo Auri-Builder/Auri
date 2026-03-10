@@ -20,8 +20,8 @@ import yaml
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PORTFOLIO_DIR = PROJECT_ROOT / "data" / "portfolio"
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+PORTFOLIO_DIR = DATA_ROOT / "data" / "portfolio"
 ACCOUNTS_YAML_PATH = PORTFOLIO_DIR / "accounts.yaml"
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ import streamlit as st
 
 from core.dashboard_cache import fetch_benchmark, load_allocation, load_dashboard_config, load_summary
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +88,8 @@ def main() -> None:
     _breadcrumb("Portfolio")
     st.caption("Live prices · sector analysis · income tracking · offline by default")
 
-    # Refresh clears the summary cache and all derived session state.
-    if st.button("Refresh"):
+    # Reload CSV clears the summary cache and all derived session state.
+    if st.button("Reload CSV", help="Re-process the uploaded CSV files. Does not fetch live prices."):
         load_summary.clear()
         load_allocation.clear()
         st.session_state.pop("price_data",      None)
@@ -104,9 +104,9 @@ def main() -> None:
         st.stop()
 
     # ── Onboarding / setup checklist ─────────────────────────────────────
-    _profile_path  = PROJECT_ROOT / "data" / "portfolio" / "profile.yaml"
-    _targets_path  = PROJECT_ROOT / "data" / "portfolio" / "targets.yaml"
-    _derived_dir   = PROJECT_ROOT / "data" / "derived"
+    _profile_path  = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
+    _targets_path  = DATA_ROOT / "data" / "portfolio" / "targets.yaml"
+    _derived_dir   = DATA_ROOT / "data" / "derived"
     _has_data      = "error" not in summary
     _has_risk      = False
     _has_targets   = _targets_path.exists()
@@ -604,7 +604,7 @@ def main() -> None:
             )
 
     # ── Retirement Readiness Score ────────────────────────────────────────
-    _retirement_profile_path = PROJECT_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    _retirement_profile_path = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
     if _retirement_profile_path.exists():
         try:
             import yaml as _yaml

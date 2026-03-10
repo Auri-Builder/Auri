@@ -29,7 +29,7 @@ LOGS.mkdir(exist_ok=True)
 
 JOBS_LOG = LOGS / "jobs.jsonl"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # SAFE_PORTFOLIO_DIR
@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # general PROJECT_ROOT sandbox used by list_dir and similar actions.
 # This prevents a job from reading arbitrary files even within the project.
 # ---------------------------------------------------------------------------
-SAFE_PORTFOLIO_DIR = (PROJECT_ROOT / "data" / "portfolio").resolve()
+SAFE_PORTFOLIO_DIR = (DATA_ROOT / "data" / "portfolio").resolve()
 
 # Canonical location of the accounts manifest (already inside SAFE_PORTFOLIO_DIR).
 ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
@@ -54,7 +54,7 @@ ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
 # Comparisons may only load files from this directory.
 # Path validation mirrors the CSV sandbox: symlink-safe is_relative_to() check.
 # ---------------------------------------------------------------------------
-SAFE_DERIVED_DIR = (PROJECT_ROOT / "data" / "derived").resolve()
+SAFE_DERIVED_DIR = (DATA_ROOT / "data" / "derived").resolve()
 
 # Symbol reference file — public market data, tracked in git, optional.
 # Stored under refs/ (not data/) so it is not caught by the data/* gitignore rule.
