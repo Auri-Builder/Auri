@@ -27,6 +27,7 @@ added_files = _metadata + [
     (str(PROJ / "agents"),         "agents"),
     (str(PROJ / "core"),           "core"),
     (str(PROJ / "refs"),           "refs"),
+    (str(PROJ / "data" / "portfolio" / "questions.yaml"), "data/portfolio"),
     (str(PROJ / ".streamlit"),     ".streamlit"),
     (str(ST_PKG / "static"),       "streamlit/static"),
     (str(ST_PKG / "vendor"),       "streamlit/vendor"),

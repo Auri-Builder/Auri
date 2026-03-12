@@ -29,6 +29,16 @@ def _setup() -> Path:
         data_root = Path(_appdata) / "Auri" / "data"
         for sub in ["portfolio", "wealth", "retirement", "retirement/scenarios", "derived"]:
             (data_root / sub).mkdir(parents=True, exist_ok=True)
+        # Copy static bundled data files to DATA_ROOT if not already present
+        import shutil
+        _static = [
+            ("data/portfolio/questions.yaml", data_root / "portfolio" / "questions.yaml"),
+        ]
+        for _src_rel, _dst in _static:
+            if not _dst.exists():
+                _src = bundle / _src_rel
+                if _src.exists():
+                    shutil.copy2(_src, _dst)
         return bundle
     else:
         here = Path(__file__).resolve().parent
