@@ -75,15 +75,25 @@ def main() -> None:
     app_dir = _setup()
     _silence_streamlit_startup()
 
+    port = 8501
+
+    # Set all config via env vars BEFORE streamlit is imported.
+    # set_option("server.port") raises RuntimeError when developmentMode is True,
+    # and in a frozen bundle streamlit detects dev-mode through means that survive
+    # the env var override.  Env vars are consumed during Streamlit's module init
+    # before any conflict validation runs.
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+    os.environ["STREAMLIT_SERVER_PORT"] = str(port)
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    os.environ["STREAMLIT_SERVER_ENABLE_CORS"] = "false"
+    os.environ["STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION"] = "false"
+    os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+
     # Patch metadata lookup before importing streamlit (frozen bundles lack dist-info)
     if getattr(sys, "frozen", False):
         _patch_importlib_metadata()
-        # Must be set via env var BEFORE streamlit is imported — set_option() is too late
-        # because streamlit reads developmentMode during module init and server.port
-        # validation raises RuntimeError if developmentMode is still True at that point.
-        os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
 
-    port = 8501
     url = f"http://localhost:{port}"
 
     # Open browser after a delay (server needs a few seconds to start)
@@ -95,14 +105,6 @@ def main() -> None:
 
     # Use bootstrap.run() directly — works in frozen mode unlike the CLI
     from streamlit.web import bootstrap
-    from streamlit import config as _st_cfg
-
-    _st_cfg.set_option("server.headless", True)
-    _st_cfg.set_option("server.port", port)
-    _st_cfg.set_option("browser.gatherUsageStats", False)
-    _st_cfg.set_option("server.enableCORS", False)
-    _st_cfg.set_option("server.enableXsrfProtection", False)
-    _st_cfg.set_option("server.fileWatcherType", "none")
 
     bootstrap.run(
         main_script_path=str(app_dir / "Home.py"),
