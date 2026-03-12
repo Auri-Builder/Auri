@@ -16,6 +16,10 @@ DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 
 def load_dashboard_config() -> dict:
+    import sys as _sys
+    # In a frozen exe there is no separate job runner process — always direct.
+    if getattr(_sys, "frozen", False) and hasattr(_sys, "_MEIPASS"):
+        return {"dev_direct_call": True}
     if not DASHBOARD_CONFIG_PATH.exists():
         return {}
     with DASHBOARD_CONFIG_PATH.open("r", encoding="utf-8") as fh:
