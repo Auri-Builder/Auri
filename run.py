@@ -44,6 +44,7 @@ def _silence_streamlit_startup() -> None:
     cfg_file = cfg_dir / "config.toml"
     if not cfg_file.exists():
         cfg_file.write_text(
+            '[global]\ndevelopmentMode = false\n\n'
             '[general]\nemail = ""\n\n'
             '[browser]\ngatherUsageStats = false\n\n'
             '[server]\nheadless = true\nport = 8501\n'
@@ -92,6 +93,7 @@ def main() -> None:
     from streamlit.web import bootstrap
     from streamlit import config as _st_cfg
 
+    _st_cfg.set_option("global.developmentMode", False)
     _st_cfg.set_option("server.headless", True)
     _st_cfg.set_option("server.port", port)
     _st_cfg.set_option("browser.gatherUsageStats", False)
