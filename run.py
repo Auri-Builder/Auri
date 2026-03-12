@@ -78,6 +78,10 @@ def main() -> None:
     # Patch metadata lookup before importing streamlit (frozen bundles lack dist-info)
     if getattr(sys, "frozen", False):
         _patch_importlib_metadata()
+        # Must be set via env var BEFORE streamlit is imported — set_option() is too late
+        # because streamlit reads developmentMode during module init and server.port
+        # validation raises RuntimeError if developmentMode is still True at that point.
+        os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
 
     port = 8501
     url = f"http://localhost:{port}"
@@ -93,7 +97,6 @@ def main() -> None:
     from streamlit.web import bootstrap
     from streamlit import config as _st_cfg
 
-    _st_cfg.set_option("global.developmentMode", False)
     _st_cfg.set_option("server.headless", True)
     _st_cfg.set_option("server.port", port)
     _st_cfg.set_option("browser.gatherUsageStats", False)
