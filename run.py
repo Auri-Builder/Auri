@@ -52,9 +52,31 @@ def _silence_streamlit_startup() -> None:
         )
 
 
+def _patch_importlib_metadata() -> None:
+    """
+    Patch importlib.metadata.version() so missing dist-info in a frozen
+    bundle returns '0.0.0' instead of raising PackageNotFoundError.
+    Streamlit calls importlib.metadata.version('streamlit') at import time.
+    """
+    import importlib.metadata as _ilm
+    _orig = _ilm.version
+
+    def _safe_version(pkg: str) -> str:
+        try:
+            return _orig(pkg)
+        except _ilm.PackageNotFoundError:
+            return "0.0.0"
+
+    _ilm.version = _safe_version  # type: ignore[assignment]
+
+
 def main() -> None:
     app_dir = _setup()
     _silence_streamlit_startup()
+
+    # Patch metadata lookup before importing streamlit (frozen bundles lack dist-info)
+    if getattr(sys, "frozen", False):
+        _patch_importlib_metadata()
 
     port = 8501
     url = f"http://localhost:{port}"
