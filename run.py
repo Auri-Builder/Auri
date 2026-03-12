@@ -38,16 +38,24 @@ def _setup() -> Path:
 
 
 def _silence_streamlit_startup() -> None:
-    """Write ~/.streamlit/config.toml to suppress first-run prompts."""
+    """Write ~/.streamlit/config.toml to suppress first-run prompts.
+
+    Always overwrite in frozen mode so stale files on the target machine
+    can't reintroduce settings (like port = 8501) that trigger Streamlit's
+    developmentMode conflict check.  Note: no explicit port entry — 8501 is
+    the default and ANY explicit port value raises RuntimeError when
+    developmentMode is True.
+    """
     cfg_dir = Path.home() / ".streamlit"
     cfg_dir.mkdir(exist_ok=True)
     cfg_file = cfg_dir / "config.toml"
-    if not cfg_file.exists():
+    frozen = getattr(__import__("sys"), "frozen", False)
+    if frozen or not cfg_file.exists():
         cfg_file.write_text(
             '[global]\ndevelopmentMode = false\n\n'
             '[general]\nemail = ""\n\n'
             '[browser]\ngatherUsageStats = false\n\n'
-            '[server]\nheadless = true\nport = 8501\n'
+            '[server]\nheadless = true\n'
             'enableCORS = false\nenableXsrfProtection = false\n',
             encoding="utf-8",
         )
@@ -84,7 +92,8 @@ def main() -> None:
     # before any conflict validation runs.
     os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
-    os.environ["STREAMLIT_SERVER_PORT"] = str(port)
+    # Do NOT set STREAMLIT_SERVER_PORT — any explicit port value (even 8501)
+    # triggers the developmentMode conflict check.  8501 is the default.
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_SERVER_ENABLE_CORS"] = "false"
     os.environ["STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION"] = "false"
