@@ -5,11 +5,23 @@ import sys
 import os
 from pathlib import Path
 import streamlit
+from PyInstaller.utils.hooks import copy_metadata, collect_data_files
 
 ST_PKG = Path(streamlit.__file__).parent
 PROJ = Path(SPECPATH)
 
-added_files = [
+# Package metadata required by importlib.metadata at runtime
+_metadata = []
+for _pkg in ["streamlit", "altair", "pandas", "numpy", "pyarrow",
+             "plotly", "pydeck", "requests", "click", "packaging",
+             "pillow", "pydantic", "watchdog", "tornado", "protobuf",
+             "rich", "narwhals", "gitpython"]:
+    try:
+        _metadata += copy_metadata(_pkg)
+    except Exception:
+        pass
+
+added_files = _metadata + [
     (str(PROJ / "Home.py"),        "."),
     (str(PROJ / "pages"),          "pages"),
     (str(PROJ / "agents"),         "agents"),
