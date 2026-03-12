@@ -132,7 +132,7 @@ def _resolve_one_csv(raw: str) -> "Path | dict":
     if not isinstance(raw, str) or not raw.strip():
         return {"error": f"CSV path must be a non-empty string, got: {raw!r}"}
 
-    resolved = (PROJECT_ROOT / raw.strip()).resolve()
+    resolved = (DATA_ROOT / raw.strip()).resolve()
 
     if not resolved.is_relative_to(SAFE_PORTFOLIO_DIR):
         return {"error": f"CSV path is outside the allowed portfolio directory: {raw!r}"}
@@ -472,7 +472,7 @@ def _resolve_one_derived_json(raw: str) -> "Path | dict":
     if not isinstance(raw, str) or not raw.strip():
         return {"error": f"Snapshot path must be a non-empty string, got: {raw!r}"}
 
-    resolved = (PROJECT_ROOT / raw.strip()).resolve()
+    resolved = (DATA_ROOT / raw.strip()).resolve()
 
     if not resolved.is_relative_to(SAFE_DERIVED_DIR):
         return {"error": f"Snapshot path is outside data/derived/: {raw!r}"}
