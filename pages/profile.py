@@ -18,8 +18,8 @@ import streamlit as st
 import yaml
 
 from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+from core.dashboard_cache import load_dashboard_config as _load_dashboard_config  # noqa: F401
 PORTFOLIO_DIR  = get_data_dir() / "portfolio"
-DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 PROFILE_PATH   = PORTFOLIO_DIR / "profile.yaml"
 QUESTIONS_PATH = PORTFOLIO_DIR / "questions.yaml"
@@ -70,13 +70,6 @@ _LABEL_DISPLAY = {
 # ---------------------------------------------------------------------------
 # Helpers — load / save
 # ---------------------------------------------------------------------------
-
-def _load_dashboard_config() -> dict:
-    if not DASHBOARD_CONFIG_PATH.exists():
-        return {}
-    with DASHBOARD_CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    return data if isinstance(data, dict) else {}
 
 
 def _load_profile() -> dict:

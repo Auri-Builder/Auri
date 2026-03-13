@@ -22,19 +22,12 @@ import yaml
 # Paths
 # ---------------------------------------------------------------------------
 from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+from core.dashboard_cache import load_dashboard_config as _load_dashboard_config  # noqa: F401
 DERIVED_DIR = get_data_dir() / "derived"
-DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _load_dashboard_config() -> dict:
-    if not DASHBOARD_CONFIG_PATH.exists():
-        return {}
-    with DASHBOARD_CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    return data if isinstance(data, dict) else {}
 
 
 def _call_action(action: str, params: dict) -> dict:
