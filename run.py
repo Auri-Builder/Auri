@@ -130,6 +130,17 @@ def main() -> None:
 
     url = f"http://localhost:{port}"
 
+    # Single-instance check: if the server is already running, just open a tab.
+    def _port_in_use(p: int) -> bool:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            return s.connect_ex(("127.0.0.1", p)) == 0
+
+    if _port_in_use(port):
+        webbrowser.open(url)
+        return
+
     # Open browser after a delay (server needs a few seconds to start)
     def _open():
         time.sleep(4)
