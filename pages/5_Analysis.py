@@ -301,8 +301,8 @@ def _breadcrumb(current: str) -> None:
         ("Wealth Builder","/wealthbuilder"),
         ("Retirement",    "/retirement"),
     ]
-    parts = [f"**{l}**" if l == current else (f"[{l}]({p})" if p else l) for l, p in pages]
-    st.caption("  ›  ".join(parts))
+    parts = [f"<strong>{l}</strong>" if l == current else (f'<a href="{p}" target="_self">{l}</a>' if p else l) for l, p in pages]
+    st.caption("  ›  ".join(parts), unsafe_allow_html=True)
 
 
 def main() -> None:

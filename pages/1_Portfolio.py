@@ -77,10 +77,10 @@ def _breadcrumb(current: str) -> None:
     parts = []
     for label, page in pages:
         if label == current:
-            parts.append(f"**{label}**")
+            parts.append(f"<strong>{label}</strong>")
         else:
-            parts.append(f"[{label}]({page})" if page else label)
-    st.caption("  ›  ".join(parts))
+            parts.append(f'<a href="{page}" target="_self">{label}</a>' if page else label)
+    st.caption("  ›  ".join(parts), unsafe_allow_html=True)
 
 
 def main() -> None:
