@@ -483,6 +483,12 @@ with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
                                       help="Annual income you want in retirement, in today's dollars.")
 
     if st.button("Save Wealth Builder Setup", type="primary", key="wb_wizard_save"):
+        # Seed demographic fields from shared profile so the WB profile is complete
+        _p_age     = int(_sp_primary.get("current_age", 0))
+        _p_ret_age = int(_sp_primary.get("target_retirement_age", 65))
+        _p_income  = float(_sp_primary.get("gross_income", 0))
+        _p_yrs     = max(1, _p_ret_age - _p_age) if _p_age else 0
+
         _wb_new_fin = {
             "annual_savings":               float(_wb_savings),
             "savings_rate_pct":             float(_wb_savings_rate),
@@ -494,11 +500,24 @@ with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
             "inflation_pct":                float(_wb_infl),
             "expected_retirement_income":   float(_wb_ret_inc),
         }
+        # Copy demographic fields from shared profile if present (avoids needing WB sidebar for hub FI projection)
+        if _p_age:
+            _wb_new_fin.update({
+                "current_age":           _p_age,
+                "target_retirement_age": _p_ret_age,
+                "gross_income":          _p_income,
+                "years_to_retirement":   _p_yrs,
+            })
         # Preserve all non-financials/spouse keys (preferences etc.)
         _current = _load_wb_profile()
         _current["financials"] = _wb_new_fin
         if _has_spouse:
-            _current.setdefault("spouse", {})["financials"] = {
+            _sp_shared = _sp.get("spouse", {})
+            _s_age     = int(_sp_shared.get("current_age", 0))
+            _s_ret_age = int(_sp_shared.get("target_retirement_age", 65))
+            _s_income  = float(_sp_shared.get("gross_income", 0))
+            _s_yrs     = max(1, _s_ret_age - _s_age) if _s_age else 0
+            _sp_fin_data = {
                 "annual_savings":      float(_wb_sp_savings),
                 "savings_rate_pct":    float(_wb_sp_savings_rate),
                 "rrsp_room":           float(_wb_sp_rrsp_rm),
@@ -508,6 +527,14 @@ with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
                 "growth_rate_pct":     float(_wb_return),
                 "inflation_pct":       float(_wb_infl),
             }
+            if _s_age:
+                _sp_fin_data.update({
+                    "current_age":           _s_age,
+                    "target_retirement_age": _s_ret_age,
+                    "gross_income":          _s_income,
+                    "years_to_retirement":   _s_yrs,
+                })
+            _current.setdefault("spouse", {})["financials"] = _sp_fin_data
         else:
             _current.pop("spouse", None)
         _wb_profile_path().parent.mkdir(parents=True, exist_ok=True)

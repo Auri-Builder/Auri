@@ -497,11 +497,20 @@ def main() -> None:
     _shared_path  = get_data_dir() / "shared_profile.yaml"
     _answers_path = get_data_dir() / "portfolio" / "answers.yaml"
     _has_approach = False
+    _wb_complete  = False
     if _profile_path.exists():
         try:
             import yaml as _yaml
             _pdata = _yaml.safe_load(_profile_path.read_text()) or {}
             _has_approach = bool((_pdata.get("goals") or {}).get("primary"))
+        except Exception:
+            pass
+    if _wealth_path.exists():
+        try:
+            import yaml as _yaml
+            _wdata = _yaml.safe_load(_wealth_path.read_text()) or {}
+            _wfin  = _wdata.get("financials", {})
+            _wb_complete = bool(_wfin.get("current_age") and _wfin.get("target_retirement_age"))
         except Exception:
             pass
     _steps = [
@@ -510,7 +519,7 @@ def main() -> None:
         (_shared_path.exists(),   "Personal profile set up",             "pages/wizard.py",       "Set up in Wizard →"),
         (_answers_path.exists(),  "Investor questionnaire answered",     "pages/profile.py",      "Investor Profile →"),
         (_has_approach,           "Investment philosophy set",           "pages/profile.py",      "Investment Approach →"),
-        (_wealth_path.exists(),   "Wealth Builder profile entered",      "pages/wizard.py",       "Set up in Wizard →"),
+        (_wb_complete,            "Wealth Builder profile entered",      "pages/wizard.py",       "Set up in Wizard →"),
         (_ret_path.exists(),      "Retirement profile entered",          "pages/7_Retirement.py", "Retirement Planner →"),
     ]
     _incomplete = [s for s in _steps if not s[0]]

@@ -137,7 +137,7 @@ def _tab_optimizer(profile: dict) -> None:
                 st.divider()
                 st.markdown("**Spouse**")
                 _sp_prov_def = sp_pref.get("province", _province_def)
-                _sp_yrs_def  = int(sp_fin.get("years_to_retirement", _yrs_def))
+                _sp_yrs_def  = max(1, int(sp_fin.get("years_to_retirement", _yrs_def)))
                 _sp_inc_def  = int(sp_fin.get("gross_income", 0))
 
                 s1, s2, s3 = st.columns(3)
