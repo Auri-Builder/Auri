@@ -745,3 +745,6 @@ def main() -> None:
 
 
 main()
+
+from core.job_runner import APP_VERSION  # noqa: E402
+st.caption(f"Auri v{APP_VERSION} · local-first · your data never leaves your machine")

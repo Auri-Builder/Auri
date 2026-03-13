@@ -87,8 +87,10 @@ def handle_list_dir(params):
         "entries": [p.name for p in target.iterdir()]
     }
 
+APP_VERSION = "1.0.0"
+
 def handle_ping(params):
-    return {"message": "pong"}
+    return {"message": "pong", "version": APP_VERSION}
 
 
 # ---------------------------------------------------------------------------
