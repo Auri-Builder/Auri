@@ -18,8 +18,8 @@ import yaml
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
-PORTFOLIO_DIR = DATA_ROOT / "data" / "portfolio"
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+PORTFOLIO_DIR = get_data_dir() / "portfolio"
 ACCOUNTS_YAML_PATH = PORTFOLIO_DIR / "accounts.yaml"
 
 # ---------------------------------------------------------------------------
@@ -399,21 +399,22 @@ st.caption(
     "Stored locally in **data/wealth/wealth_profile.yaml** (gitignored)."
 )
 
-_WB_PROFILE_PATH = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+def _wb_profile_path():
+    return get_data_dir() / "wealth" / "wealth_profile.yaml"
 
 def _load_wb_profile() -> dict:
-    if not _WB_PROFILE_PATH.exists():
+    if not _wb_profile_path().exists():
         return {}
     try:
-        return yaml.safe_load(_WB_PROFILE_PATH.read_text()) or {}
+        return yaml.safe_load(_wb_profile_path().read_text()) or {}
     except Exception:
         return {}
 
 def _save_wb_profile(data: dict) -> None:
-    _WB_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _wb_profile_path().parent.mkdir(parents=True, exist_ok=True)
     existing = _load_wb_profile()
     existing.update(data)
-    _WB_PROFILE_PATH.write_text(
+    _wb_profile_path().write_text(
         yaml.safe_dump(existing, default_flow_style=False, allow_unicode=True, sort_keys=False)
     )
 
@@ -509,8 +510,8 @@ with st.expander("Set up Wealth Builder", expanded=not _wb_configured):
             }
         else:
             _current.pop("spouse", None)
-        _WB_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _WB_PROFILE_PATH.write_text(
+        _wb_profile_path().parent.mkdir(parents=True, exist_ok=True)
+        _wb_profile_path().write_text(
             yaml.safe_dump(_current, default_flow_style=False, allow_unicode=True, sort_keys=False)
         )
         st.success("Wealth Builder setup saved.")

@@ -24,21 +24,36 @@ def _setup() -> Path:
         bundle = Path(sys._MEIPASS)  # type: ignore[attr-defined]
         if str(bundle) not in sys.path:
             sys.path.insert(0, str(bundle))
-        # Ensure writable data dirs exist next to the exe
+        # Resolve Auri home
         _appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-        data_root = Path(_appdata) / "Auri" / "data"
-        for sub in ["portfolio", "wealth", "retirement", "retirement/scenarios", "derived"]:
-            (data_root / sub).mkdir(parents=True, exist_ok=True)
-        # Copy static bundled data files to DATA_ROOT if not already present
+        auri_base = Path(_appdata) / "Auri"
+        auri_base.mkdir(parents=True, exist_ok=True)
+
         import shutil
+
+        # ── One-time migration: flat data/ layout → profiles/default/data/ ──
+        old_data = auri_base / "data"
+        profiles_dir = auri_base / "profiles"
+        default_profile_data = profiles_dir / "default" / "data"
+        if old_data.exists() and not profiles_dir.exists():
+            # Move the entire old data tree into the default profile
+            default_profile_data.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_data), str(default_profile_data))
+
+        # ── Ensure default profile dirs exist ────────────────────────────────
+        for sub in ["portfolio", "wealth", "retirement", "retirement/scenarios", "derived"]:
+            (default_profile_data / sub).mkdir(parents=True, exist_ok=True)
+
+        # ── Copy static bundled files into default profile if missing ────────
         _static = [
-            ("data/portfolio/questions.yaml", data_root / "portfolio" / "questions.yaml"),
+            ("data/portfolio/questions.yaml", default_profile_data / "portfolio" / "questions.yaml"),
         ]
         for _src_rel, _dst in _static:
             if not _dst.exists():
                 _src = bundle / _src_rel
                 if _src.exists():
                     shutil.copy2(_src, _dst)
+
         return bundle
     else:
         here = Path(__file__).resolve().parent

@@ -26,8 +26,8 @@ import streamlit as st
 logger = logging.getLogger(__name__)
 
 
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
-PROFILE_PATH  = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+PROFILE_PATH  = get_data_dir() / "wealth" / "wealth_profile.yaml"
 PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 try:

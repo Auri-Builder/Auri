@@ -17,8 +17,8 @@ from pathlib import Path
 import streamlit as st
 import yaml
 
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
-PORTFOLIO_DIR = DATA_ROOT / "data" / "portfolio"
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+PORTFOLIO_DIR  = get_data_dir() / "portfolio"
 DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 PROFILE_PATH   = PORTFOLIO_DIR / "profile.yaml"

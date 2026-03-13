@@ -8,12 +8,16 @@ Hub content lives in pages/hub.py.
 from __future__ import annotations
 
 import streamlit as st
+from core._paths import set_active_profile
 
 st.set_page_config(
     page_title="Auri — Financial Intelligence",
     layout="wide",
     initial_sidebar_state="auto",
 )
+
+# Apply the active profile on every rerun so all path helpers are correct
+set_active_profile(st.session_state.get("active_profile", "default"))
 
 pg = st.navigation(
     {

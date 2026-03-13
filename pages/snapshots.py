@@ -21,8 +21,8 @@ import yaml
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
-DERIVED_DIR = DATA_ROOT / "data" / "derived"
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+DERIVED_DIR = get_data_dir() / "derived"
 DASHBOARD_CONFIG_PATH = PROJECT_ROOT / "dashboard.yaml"
 
 # ---------------------------------------------------------------------------

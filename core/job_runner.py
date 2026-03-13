@@ -29,46 +29,32 @@ LOGS.mkdir(exist_ok=True)
 
 JOBS_LOG = LOGS / "jobs.jsonl"
 
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+from core._paths import PROJECT_ROOT, get_data_root as _get_data_root, get_data_dir as _get_data_dir  # noqa: F401
 
 # ---------------------------------------------------------------------------
-# SAFE_PORTFOLIO_DIR
+# SAFE_PORTFOLIO_DIR / SAFE_DERIVED_DIR
 #
 # SECURITY PRINCIPLE: Double sandbox for financial data.
 #
-# Portfolio CSVs must reside inside this directory — tighter than the
-# general PROJECT_ROOT sandbox used by list_dir and similar actions.
-# This prevents a job from reading arbitrary files even within the project.
+# These are functions (not constants) so they always resolve against the
+# currently active profile's data directory when called from a handler.
 # ---------------------------------------------------------------------------
-SAFE_PORTFOLIO_DIR = (DATA_ROOT / "data" / "portfolio").resolve()
 
-# Canonical location of the accounts manifest (already inside SAFE_PORTFOLIO_DIR).
-ACCOUNTS_MANIFEST_PATH = SAFE_PORTFOLIO_DIR / "accounts.yaml"
+def _safe_portfolio_dir() -> Path:
+    """Return the resolved portfolio sandbox for the active profile."""
+    return (_get_data_dir() / "portfolio").resolve()
 
-# ---------------------------------------------------------------------------
-# SAFE_DERIVED_DIR
-#
-# SECURITY PRINCIPLE: Separate sandbox for derived outputs.
-#
-# Snapshot files are written here — aggregates only, never row-level data.
-# Comparisons may only load files from this directory.
-# Path validation mirrors the CSV sandbox: symlink-safe is_relative_to() check.
-# ---------------------------------------------------------------------------
-SAFE_DERIVED_DIR = (DATA_ROOT / "data" / "derived").resolve()
+
+def _safe_derived_dir() -> Path:
+    """Return the resolved derived-outputs sandbox for the active profile."""
+    return (_get_data_dir() / "derived").resolve()
+
 
 # Symbol reference file — public market data, tracked in git, optional.
-# Stored under refs/ (not data/) so it is not caught by the data/* gitignore rule.
-# Enriches sector/asset_class fields that broker CSV exports typically omit.
 SYMBOL_REF_PATH = (PROJECT_ROOT / "refs" / "symbols.yaml").resolve()
 
 # LLM provider config (gitignored — API keys must never be stored here).
-# Absent → local Ollama default.  Present → overrides provider / model.
 LLM_CONFIG_PATH = (PROJECT_ROOT / "llm_config.yaml").resolve()
-
-# ORI Personal — risk-profiling config paths (both gitignored except questions).
-QUESTIONS_PATH = SAFE_PORTFOLIO_DIR / "questions.yaml"
-PROFILE_PATH   = SAFE_PORTFOLIO_DIR / "profile.yaml"
-ANSWERS_PATH   = SAFE_PORTFOLIO_DIR / "answers.yaml"
 
 # ---------------------------------------------------------------------------
 # handle_list_dir
@@ -132,9 +118,10 @@ def _resolve_one_csv(raw: str) -> "Path | dict":
     if not isinstance(raw, str) or not raw.strip():
         return {"error": f"CSV path must be a non-empty string, got: {raw!r}"}
 
-    resolved = (DATA_ROOT / raw.strip()).resolve()
+    safe_dir = _safe_portfolio_dir()
+    resolved = (_get_data_root() / raw.strip()).resolve()
 
-    if not resolved.is_relative_to(SAFE_PORTFOLIO_DIR):
+    if not resolved.is_relative_to(safe_dir):
         return {"error": f"CSV path is outside the allowed portfolio directory: {raw!r}"}
 
     if not resolved.exists():
@@ -177,7 +164,8 @@ def _load_accounts_manifest() -> "dict | dict":
         The 'accounts' mapping {csv_filename: metadata_dict} on success.
         {"error": str} if the file is missing, unparseable, or malformed.
     """
-    if not ACCOUNTS_MANIFEST_PATH.exists():
+    _manifest_path = _safe_portfolio_dir() / "accounts.yaml"
+    if not _manifest_path.exists():
         return {
             "error": (
                 "accounts.yaml not found in data/portfolio/ — "
@@ -186,7 +174,7 @@ def _load_accounts_manifest() -> "dict | dict":
         }
 
     try:
-        with ACCOUNTS_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
+        with _manifest_path.open("r", encoding="utf-8") as fh:
             manifest = yaml.safe_load(fh)  # safe_load: no arbitrary tag execution
     except yaml.YAMLError as exc:
         return {"error": f"accounts.yaml parse error: {exc}"}
@@ -418,7 +406,8 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     # --- 6b. Owner-split account balances ---
     # Reads accounts.yaml for owner fields and groups balances by (owner, account_type).
     try:
-        _acct_yaml = yaml.safe_load(ACCOUNTS_MANIFEST_PATH.read_text()) if ACCOUNTS_MANIFEST_PATH.exists() else {}
+        _amp = _safe_portfolio_dir() / "accounts.yaml"
+        _acct_yaml = yaml.safe_load(_amp.read_text()) if _amp.exists() else {}
         _acct_meta = (_acct_yaml or {}).get("accounts", {})
         _id_to_owner = {
             str(m.get("account_id", "")).upper(): m.get("owner", "primary").lower()
@@ -447,8 +436,9 @@ def handle_portfolio_summary_v0(params: dict) -> dict:
     try:
         from agents.ori_ia.analytics import check_policy  # noqa: PLC0415
         _constraints: dict = {}
-        if PROFILE_PATH.exists():
-            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+        _pp = _safe_portfolio_dir() / "profile.yaml"
+        if _pp.exists():
+            with _pp.open("r", encoding="utf-8") as fh:
                 _prof = yaml.safe_load(fh) or {}
             _constraints = _prof.get("constraints") or {}
         summary["policy_flags"] = check_policy(summary, _constraints)
@@ -472,9 +462,10 @@ def _resolve_one_derived_json(raw: str) -> "Path | dict":
     if not isinstance(raw, str) or not raw.strip():
         return {"error": f"Snapshot path must be a non-empty string, got: {raw!r}"}
 
-    resolved = (DATA_ROOT / raw.strip()).resolve()
+    safe_dir = _safe_derived_dir()
+    resolved = (_get_data_root() / raw.strip()).resolve()
 
-    if not resolved.is_relative_to(SAFE_DERIVED_DIR):
+    if not resolved.is_relative_to(safe_dir):
         return {"error": f"Snapshot path is outside data/derived/: {raw!r}"}
 
     if not resolved.exists():
@@ -563,9 +554,10 @@ def handle_portfolio_snapshot_v0(params: dict) -> dict:
     }
 
     # --- Write to data/derived/ ---
-    SAFE_DERIVED_DIR.mkdir(parents=True, exist_ok=True)
+    _derived = _safe_derived_dir()
+    _derived.mkdir(parents=True, exist_ok=True)
     filename = f"{date_str}-{safe_label}-summary.json"
-    out_path = SAFE_DERIVED_DIR / filename
+    out_path = _derived / filename
     out_path.write_text(json.dumps(snapshot, indent=2))
 
     return {
@@ -781,9 +773,10 @@ def handle_portfolio_commentary_v0(params: dict) -> dict:
 
     # Load full investor profile from profile.yaml (optional — graceful if absent)
     profile: dict | None = None
-    if PROFILE_PATH.exists():
+    _profile_path = _safe_portfolio_dir() / "profile.yaml"
+    if _profile_path.exists():
         try:
-            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+            with _profile_path.open("r", encoding="utf-8") as fh:
                 profile = yaml.safe_load(fh) or None
         except Exception:
             pass  # non-fatal — commentary works without profile
@@ -846,26 +839,29 @@ def handle_portfolio_profile_v0(params: dict) -> dict:
     """
     write_profile = params.get("write_profile", True)
 
-    if not QUESTIONS_PATH.exists():
-        return {"error": f"questions.yaml not found at {QUESTIONS_PATH}"}
-    if not ANSWERS_PATH.exists():
-        return {"error": f"answers.yaml not found at {ANSWERS_PATH}"}
+    _pf_dir       = _safe_portfolio_dir()
+    _questions    = _pf_dir / "questions.yaml"
+    _answers      = _pf_dir / "answers.yaml"
+    _profile_yaml = _pf_dir / "profile.yaml"
+
+    if not _questions.exists():
+        return {"error": f"questions.yaml not found at {_questions}"}
+    if not _answers.exists():
+        return {"error": f"answers.yaml not found at {_answers}"}
 
     try:
         from agents.ori_ia.risk_profile import load_and_score  # noqa: PLC0415
         result = load_and_score(
-            questions_path=QUESTIONS_PATH,
-            answers_path=ANSWERS_PATH,
+            questions_path=_questions,
+            answers_path=_answers,
         )
     except Exception as exc:
         return {"error": f"Risk scoring failed: {exc}"}
 
     # Optionally write derived fields back into profile.yaml.
-    # This keeps profile.yaml as the single source of truth for the latest score
-    # without requiring the dashboard to re-run the scorer on every page load.
-    if write_profile and PROFILE_PATH.exists():
+    if write_profile and _profile_yaml.exists():
         try:
-            with PROFILE_PATH.open("r", encoding="utf-8") as fh:
+            with _profile_yaml.open("r", encoding="utf-8") as fh:
                 profile_data = yaml.safe_load(fh) or {}
             if "derived" not in profile_data:
                 profile_data["derived"] = {}
@@ -873,7 +869,7 @@ def handle_portfolio_profile_v0(params: dict) -> dict:
             profile_data["derived"]["risk_label"]                 = result["risk_label"]
             profile_data["derived"]["max_drawdown_tolerance_pct"] = result["max_drawdown_tolerance_pct"]
             profile_data["derived"]["last_scored"]                = datetime.now().date().isoformat()
-            with PROFILE_PATH.open("w", encoding="utf-8") as fh:
+            with _profile_yaml.open("w", encoding="utf-8") as fh:
                 yaml.dump(profile_data, fh, allow_unicode=True, sort_keys=False)
         except Exception as exc:
             # Non-fatal — score is still returned, just not persisted.
@@ -966,7 +962,7 @@ def handle_portfolio_allocation_v0(params: dict) -> dict:
     Returns {"error": "no_targets_file"} if targets.yaml does not exist —
     callers should treat this as a configuration prompt, not an error.
     """
-    targets_path = SAFE_PORTFOLIO_DIR / "targets.yaml"
+    targets_path = _safe_portfolio_dir() / "targets.yaml"
     if not targets_path.exists():
         return {"error": "no_targets_file"}
 
@@ -1034,11 +1030,12 @@ def handle_portfolio_suggest_targets_v0(params: dict) -> dict:
     Returns {"error": "no_profile"} when profile.yaml does not exist.
     Returns {"error": "no_risk_score"} when the derived score is absent.
     """
-    if not PROFILE_PATH.exists():
+    _profile_path = _safe_portfolio_dir() / "profile.yaml"
+    if not _profile_path.exists():
         return {"error": "no_profile"}
 
     try:
-        profile_data = yaml.safe_load(PROFILE_PATH.read_text(encoding="utf-8")) or {}
+        profile_data = yaml.safe_load(_profile_path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError) as exc:
         return {"error": f"Failed to read profile.yaml: {exc}"}
 
@@ -1086,7 +1083,7 @@ def handle_portfolio_save_targets_v0(params: dict) -> dict:
         "targets": {k: float(v) for k, v in targets.items()},
     }
 
-    targets_path = SAFE_PORTFOLIO_DIR / "targets.yaml"
+    targets_path = _safe_portfolio_dir() / "targets.yaml"
     try:
         targets_path.write_text(
             yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),

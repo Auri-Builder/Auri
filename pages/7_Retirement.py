@@ -34,9 +34,9 @@ import streamlit as st
 logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
-PROFILE_PATH   = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
-SCENARIOS_DIR  = DATA_ROOT / "data" / "retirement" / "scenarios"
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
+PROFILE_PATH   = get_data_dir() / "retirement" / "retirement_profile.yaml"
+SCENARIOS_DIR  = get_data_dir() / "retirement" / "scenarios"
 REFS_DIR       = PROJECT_ROOT / "refs" / "retirement"
 
 _DISCLAIMER = (

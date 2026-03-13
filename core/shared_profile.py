@@ -32,8 +32,11 @@ from typing import Any
 
 import yaml
 
-from core._paths import PROJECT_ROOT as _PROJECT_ROOT, DATA_ROOT as _DATA_ROOT  # noqa: F401
-PROFILE_PATH   = _DATA_ROOT / "data" / "shared_profile.yaml"
+from core._paths import PROJECT_ROOT as _PROJECT_ROOT, get_data_dir as _get_data_dir  # noqa: F401
+
+
+def _profile_path() -> "Path":
+    return _get_data_dir() / "shared_profile.yaml"
 
 # Provinces supported by the tax engine
 PROVINCES = ["BC", "AB", "ON", "QC", "SK", "MB", "NS", "NB", "PE", "NL"]
@@ -46,10 +49,11 @@ RISK_LEVELS = ["conservative", "moderate", "aggressive"]
 
 def load_shared_profile() -> dict:
     """Load shared profile from disk. Returns empty dict if not found."""
-    if not PROFILE_PATH.exists():
+    p = _profile_path()
+    if not p.exists():
         return {}
     try:
-        data = yaml.safe_load(PROFILE_PATH.read_text()) or {}
+        data = yaml.safe_load(p.read_text()) or {}
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -57,8 +61,9 @@ def load_shared_profile() -> dict:
 
 def save_shared_profile(data: dict) -> None:
     """Persist shared profile to disk."""
-    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with PROFILE_PATH.open("w") as f:
+    p = _profile_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("w") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
 

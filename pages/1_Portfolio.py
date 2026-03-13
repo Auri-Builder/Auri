@@ -23,7 +23,7 @@ import streamlit as st
 
 from core.dashboard_cache import fetch_benchmark, load_allocation, load_dashboard_config, load_summary
 
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+from core._paths import PROJECT_ROOT, get_data_dir  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +104,9 @@ def main() -> None:
         st.stop()
 
     # ── Onboarding / setup checklist ─────────────────────────────────────
-    _profile_path  = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
-    _targets_path  = DATA_ROOT / "data" / "portfolio" / "targets.yaml"
-    _derived_dir   = DATA_ROOT / "data" / "derived"
+    _profile_path  = get_data_dir() / "portfolio" / "profile.yaml"
+    _targets_path  = get_data_dir() / "portfolio" / "targets.yaml"
+    _derived_dir   = get_data_dir() / "derived"
     _has_data      = "error" not in summary
     _has_risk      = False
     _has_targets   = _targets_path.exists()
@@ -604,7 +604,7 @@ def main() -> None:
             )
 
     # ── Retirement Readiness Score ────────────────────────────────────────
-    _retirement_profile_path = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    _retirement_profile_path = get_data_dir() / "retirement" / "retirement_profile.yaml"
     if _retirement_profile_path.exists():
         try:
             import yaml as _yaml

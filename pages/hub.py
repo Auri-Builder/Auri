@@ -17,7 +17,16 @@ from pathlib import Path
 
 import streamlit as st
 
-from core._paths import PROJECT_ROOT, DATA_ROOT  # noqa: F401
+from core._paths import (  # noqa: F401
+    PROJECT_ROOT,
+    _is_frozen,
+    get_data_dir,
+    get_active_profile,
+    set_active_profile,
+    list_profiles,
+    create_profile,
+    rename_profile,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,7 +57,7 @@ def _card(title: str, icon: str, lines: list[tuple[str, str]], link_page: str, l
 def _portfolio_status() -> dict:
     """Read cached summary if available; otherwise return empty."""
     # If accounts.yaml is gone, invalidate cache immediately so hub shows clean state
-    _accounts_file = DATA_ROOT / "data" / "portfolio" / "accounts.yaml"
+    _accounts_file = get_data_dir() / "portfolio" / "accounts.yaml"
     if not _accounts_file.exists():
         try:
             from core.dashboard_cache import load_summary  # noqa: PLC0415
@@ -72,7 +81,7 @@ def _portfolio_status() -> dict:
 
 def _has_risk_profile() -> bool:
     """Return True if the investor questionnaire has been scored."""
-    profile_path = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
+    profile_path = get_data_dir() / "portfolio" / "profile.yaml"
     if not profile_path.exists():
         return False
     try:
@@ -85,7 +94,7 @@ def _has_risk_profile() -> bool:
 
 def _retirement_status() -> dict:
     """Read retirement profile + compute readiness score (quick deterministic run)."""
-    profile_path = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    profile_path = get_data_dir() / "retirement" / "retirement_profile.yaml"
     if not profile_path.exists():
         return {}
     try:
@@ -151,7 +160,7 @@ def _retirement_status() -> dict:
 
 def _wealth_status() -> dict:
     """Read wealth builder profile + run quick FI projection if data available."""
-    profile_path = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
+    profile_path = get_data_dir() / "wealth" / "wealth_profile.yaml"
     if not profile_path.exists():
         return {}
     try:
@@ -386,20 +395,106 @@ def _build_brief_html(
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _profile_selector() -> None:
+    """Profile switcher — only shown in the frozen exe (multi-profile mode)."""
+    if not _is_frozen():
+        return
+
+    profiles = list_profiles()
+    profile_ids    = [p["id"]           for p in profiles]
+    profile_labels = [p["display_name"] for p in profiles]
+
+    current_id = get_active_profile()
+    current_idx = profile_ids.index(current_id) if current_id in profile_ids else 0
+
+    col_sel, col_new, col_rename = st.columns([3, 1, 1])
+
+    with col_sel:
+        chosen_label = st.selectbox(
+            "Profile",
+            options=profile_labels,
+            index=current_idx,
+            label_visibility="collapsed",
+            key="profile_selector_box",
+        )
+        chosen_id = profile_ids[profile_labels.index(chosen_label)]
+        if chosen_id != current_id:
+            st.session_state["active_profile"] = chosen_id
+            set_active_profile(chosen_id)
+            # Clear all cached data so the new profile loads fresh
+            from core.dashboard_cache import load_summary  # noqa: PLC0415
+            load_summary.clear()
+            for _key in ["price_data", "wb_opt_ran", "wb_proj_ran", "wb_reb_ran"]:
+                st.session_state.pop(_key, None)
+            st.rerun()
+
+    with col_new:
+        if st.button("+ New Profile", use_container_width=True):
+            st.session_state["_new_profile_open"] = True
+
+    with col_rename:
+        if st.button("Rename", use_container_width=True):
+            st.session_state["_rename_profile_open"] = True
+
+    # ── New profile form ──────────────────────────────────────────────────
+    if st.session_state.get("_new_profile_open"):
+        with st.container(border=True):
+            st.markdown("**Create new profile**")
+            new_name = st.text_input("Profile name", key="new_profile_name_input",
+                                     placeholder="e.g. Kids RESP, Dad's Portfolio")
+            c1, c2 = st.columns(2)
+            if c1.button("Create", key="new_profile_create_btn"):
+                if new_name.strip():
+                    new_id = create_profile(new_name.strip())
+                    st.session_state["active_profile"] = new_id
+                    set_active_profile(new_id)
+                    st.session_state.pop("_new_profile_open", None)
+                    st.session_state.pop("new_profile_name_input", None)
+                    from core.dashboard_cache import load_summary  # noqa: PLC0415
+                    load_summary.clear()
+                    st.rerun()
+                else:
+                    st.error("Enter a name.")
+            if c2.button("Cancel", key="new_profile_cancel_btn"):
+                st.session_state.pop("_new_profile_open", None)
+                st.rerun()
+
+    # ── Rename form ───────────────────────────────────────────────────────
+    if st.session_state.get("_rename_profile_open"):
+        with st.container(border=True):
+            st.markdown(f"**Rename '{chosen_label}'**")
+            new_label = st.text_input("New name", key="rename_profile_input",
+                                      value=chosen_label)
+            c1, c2 = st.columns(2)
+            if c1.button("Save", key="rename_profile_save_btn"):
+                if new_label.strip():
+                    rename_profile(chosen_id, new_label.strip())
+                    st.session_state.pop("_rename_profile_open", None)
+                    st.rerun()
+                else:
+                    st.error("Enter a name.")
+            if c2.button("Cancel", key="rename_profile_cancel_btn"):
+                st.session_state.pop("_rename_profile_open", None)
+                st.rerun()
+
+
 def main() -> None:
     # ── Header ────────────────────────────────────────────────────────────
     st.title("Auri")
     st.caption("Personal financial intelligence · local-first · your data never leaves your machine")
 
+    # ── Profile selector (exe only) ───────────────────────────────────────
+    _profile_selector()
+
     # ── Setup banner (only shown until all steps complete) ────────────────
-    _profile_path  = DATA_ROOT / "data" / "portfolio" / "profile.yaml"
-    _targets_path  = DATA_ROOT / "data" / "portfolio" / "targets.yaml"
-    _accounts_path = DATA_ROOT / "data" / "portfolio" / "accounts.yaml"
-    _ret_path      = DATA_ROOT / "data" / "retirement" / "retirement_profile.yaml"
+    _profile_path  = get_data_dir() / "portfolio" / "profile.yaml"
+    _targets_path  = get_data_dir() / "portfolio" / "targets.yaml"
+    _accounts_path = get_data_dir() / "portfolio" / "accounts.yaml"
+    _ret_path      = get_data_dir() / "retirement" / "retirement_profile.yaml"
     _ai_ok         = bool(_ai_status())
 
-    _wealth_path  = DATA_ROOT / "data" / "wealth" / "wealth_profile.yaml"
-    _shared_path  = DATA_ROOT / "data" / "shared_profile.yaml"
+    _wealth_path  = get_data_dir() / "wealth" / "wealth_profile.yaml"
+    _shared_path  = get_data_dir() / "shared_profile.yaml"
     _steps = [
         (_accounts_path.exists(), "Portfolio CSV uploaded",         "pages/wizard.py",           "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",         "pages/wizard.py",           "Configure in Upload Wizard →"),
@@ -590,7 +685,7 @@ def main() -> None:
     _brief_portfolio  = bool(portfolio)
     _brief_wealth     = bool(wealth)
     _brief_retirement = bool(retirement)
-    _brief_commentary_path = DATA_ROOT / "data" / "derived" / "commentary_latest.json"
+    _brief_commentary_path = get_data_dir() / "derived" / "commentary_latest.json"
     _brief_commentary = _brief_commentary_path.exists()
     _can_generate     = _brief_portfolio and _brief_wealth
 
