@@ -496,11 +496,20 @@ def main() -> None:
     _wealth_path  = get_data_dir() / "wealth" / "wealth_profile.yaml"
     _shared_path  = get_data_dir() / "shared_profile.yaml"
     _answers_path = get_data_dir() / "portfolio" / "answers.yaml"
+    _has_approach = False
+    if _profile_path.exists():
+        try:
+            import yaml as _yaml
+            _pdata = _yaml.safe_load(_profile_path.read_text()) or {}
+            _has_approach = bool((_pdata.get("goals") or {}).get("primary"))
+        except Exception:
+            pass
     _steps = [
         (_accounts_path.exists(), "Portfolio CSV uploaded",              "pages/wizard.py",       "Upload Wizard →"),
         (_ai_ok,                  "AI provider configured",              "pages/wizard.py",       "Configure in Upload Wizard →"),
         (_shared_path.exists(),   "Personal profile set up",             "pages/wizard.py",       "Set up in Wizard →"),
         (_answers_path.exists(),  "Investor questionnaire answered",     "pages/profile.py",      "Investor Profile →"),
+        (_has_approach,           "Investment philosophy set",           "pages/profile.py",      "Investment Approach →"),
         (_wealth_path.exists(),   "Wealth Builder profile entered",      "pages/wizard.py",       "Set up in Wizard →"),
         (_ret_path.exists(),      "Retirement profile entered",          "pages/7_Retirement.py", "Retirement Planner →"),
     ]
