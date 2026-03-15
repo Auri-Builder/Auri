@@ -12,7 +12,14 @@ Your browser opens automatically to the Auri dashboard.
 > Subsequent launches are faster (5-10 seconds).
 
 ---
+## TD webbbroker portfolio downloads
+To download CSV files from your TD webbroker account, follow these steps:
+1. Log in to your TD webbroker account and navigate to the "Statements and Documents" section.
+2. Select the account and the specific statement period you want to download. (ensure you get all your accounts needed for your portfolio)
+3. Look for an option to download or export the statement and choose the CSV format. Usually in the upper right corner 
+4. Complete the download process to save the file on your computer. 
 
+For more detailed instructions, you can refer to the video linked in the first result. (pending)
 ## First-Time Setup
 
 The Hub will guide you through 5 steps:
