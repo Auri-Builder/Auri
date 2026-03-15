@@ -32,7 +32,7 @@ The Hub will guide you through 5 steps:
 | 4. Retirement | CPP estimate, account balances, spending target |
 | 5. AI Provider | Free Groq API key (optional, for commentary) |
 
-**Getting a free Groq API key** (optional):
+**Getting a free Groq API key** (optional as you can use most AI providers you just need an API key):
 1. Go to [console.groq.com](https://console.groq.com)
 2. Sign up → API Keys → Create API Key
 3. Paste it in Setup Wizard → AI Provider
