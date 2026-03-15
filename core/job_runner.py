@@ -860,11 +860,14 @@ def handle_portfolio_profile_v0(params: dict) -> dict:
     except Exception as exc:
         return {"error": f"Risk scoring failed: {exc}"}
 
-    # Optionally write derived fields back into profile.yaml.
-    if write_profile and _profile_yaml.exists():
+    # Optionally write derived fields back into profile.yaml (create if needed).
+    if write_profile:
         try:
-            with _profile_yaml.open("r", encoding="utf-8") as fh:
-                profile_data = yaml.safe_load(fh) or {}
+            _profile_yaml.parent.mkdir(parents=True, exist_ok=True)
+            profile_data = {}
+            if _profile_yaml.exists():
+                with _profile_yaml.open("r", encoding="utf-8") as fh:
+                    profile_data = yaml.safe_load(fh) or {}
             if "derived" not in profile_data:
                 profile_data["derived"] = {}
             profile_data["derived"]["risk_score"]                 = result["risk_score"]

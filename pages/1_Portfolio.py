@@ -108,6 +108,7 @@ def main() -> None:
     _targets_path  = get_data_dir() / "portfolio" / "targets.yaml"
     _derived_dir   = get_data_dir() / "derived"
     _has_data      = "error" not in summary
+    _has_answers   = (get_data_dir() / "portfolio" / "answers.yaml").exists()
     _has_risk      = False
     _has_targets   = _targets_path.exists()
     _has_snapshots = any(_derived_dir.glob("*.json")) if _derived_dir.exists() else False
@@ -123,7 +124,7 @@ def main() -> None:
     # (label, done, page_link, link_text)
     _steps = [
         ("Portfolio data loaded",        _has_data,      "pages/wizard.py",      "Upload Wizard →"),
-        ("Investor questionnaire done",  _has_risk,      "pages/profile.py",     "Complete Questionnaire →"),
+        ("Investor questionnaire done",  _has_answers,   "pages/profile.py",     "Complete Questionnaire →"),
         ("Risk score computed",          _has_risk,      "pages/profile.py",     "Run Scorer →"),
         ("Target allocation defined",    _has_targets,   "pages/5_Analysis.py",  "Suggest from Risk Score →"),
         ("First snapshot saved",         _has_snapshots, "pages/snapshots.py",   "Create Snapshot →"),
